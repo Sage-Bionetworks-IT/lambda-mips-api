@@ -11,11 +11,11 @@ repos:
     -   id: trailing-whitespace
     -   id: check-ast
 -   repo: https://github.com/adrienverge/yamllint
-    rev: v1.27.1
+    rev: v1.28.0
     hooks:
     -   id: yamllint
 -   repo: https://github.com/awslabs/cfn-python-lint
-    rev: v0.63.2
+    rev: v0.71.1
     hooks:
     -   id: cfn-python-lint
         files: template\.(json|yml|yaml)$
