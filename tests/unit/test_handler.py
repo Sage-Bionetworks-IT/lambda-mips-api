@@ -1,12 +1,16 @@
+import mips_api
+
+import datetime
+import io
 import json
+import os
 
+import boto3
 import pytest
+from botocore.stub import Stubber
 
-from hello_world import app
 
-
-@pytest.fixture()
-def apigw_event():
+def apigw_event(path, method='GET'):
     """ Generates API GW Event"""
 
     return {
@@ -16,7 +20,7 @@ def apigw_event():
             "resourceId": "123456",
             "apiId": "1234567890",
             "resourcePath": "/{proxy+}",
-            "httpMethod": "POST",
+            "httpMethod": method,
             "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
             "accountId": "123456789012",
             "identity": {
@@ -55,19 +59,106 @@ def apigw_event():
             "CloudFront-Forwarded-Proto": "https",
             "Accept-Encoding": "gzip, deflate, sdch",
         },
-        "pathParameters": {"proxy": "/examplepath"},
-        "httpMethod": "POST",
+        "pathParameters": {"proxy": path},
+        "httpMethod": method,
         "stageVariables": {"baz": "qux"},
-        "path": "/examplepath",
+        "path": path,
     }
 
 
-def test_lambda_handler(apigw_event, mocker):
+@pytest.fixture()
+def catalog_event():
+    return apigw_event('/catalog/ProgramCodes.json')
 
-    ret = app.lambda_handler(apigw_event, "")
-    data = json.loads(ret["body"])
 
-    assert ret["statusCode"] == 200
-    assert "message" in ret["body"]
-    assert data["message"] == "hello world"
-    # assert "location" in data.dict_keys()
+@pytest.fixture()
+def catalog_other_event():
+    return apigw_event('/catalog/ProgramCodesOther.json')
+
+
+@pytest.fixture()
+def category_event():
+    return apigw_event('/costs/CategoryRules.yaml')
+
+
+@pytest.fixture()
+def purge_event():
+    return apigw_event('/cache/purge', method='DELETE')
+
+
+@pytest.fixture()
+def refresh_event():
+    return apigw_event('/cache/refresh')
+
+
+def test_lambda_handler(catalog_event, catalog_other_event, category_event, purge_event, refresh_event, mocker):
+    # mock file contents
+    cache_data = 'cache body'
+
+    # mock class instances
+    mips_api.mips_app = mocker.MagicMock(spec=mips_api.mips.App)
+    mips_api.s3_cache = mocker.MagicMock(spec=mips_api.cache.S3Cache)
+
+    # cache hit
+    mips_api.s3_cache.get_cache.return_value = cache_data
+    for event in [ catalog_event, catalog_other_event, category_event ]:
+        ret = mips_api.lambda_handler(event, "")
+        assert ret['statusCode'] == 200
+
+        json_data = json.loads(ret["body"])
+        assert json_data == cache_data
+
+        mips_api.s3_cache.get_cache.assert_called_with(event['path'])
+        mips_api.mips_app.get_mips_data.assert_not_called()
+
+    # cache miss
+    mips_api.s3_cache.get_cache.side_effect = Exception
+    mips_api.mips_app.get_mips_data.return_value = cache_data
+    for event in [ catalog_event, catalog_other_event, category_event ]:
+        ret = mips_api.lambda_handler(event, "")
+        assert ret['statusCode'] == 200
+
+        json_data = json.loads(ret["body"])
+        assert json_data == cache_data
+
+        mips_api.s3_cache.get_cache.assert_called_with(event['path'])
+        mips_api.mips_app.get_mips_data.assert_called_with(event['path'])
+
+    # cache refresh
+    ret = mips_api.lambda_handler(refresh_event, "")
+    assert ret['statusCode'] == 201
+    json_data = json.loads(ret["body"])
+    assert json_data == 'success'
+
+    mips_api.mips_app.refresh_cache.side_effect = Exception
+    ret = mips_api.lambda_handler(refresh_event, "")
+    assert ret['statusCode'] == 500
+    json_data = json.loads(ret["body"])
+    assert 'error' in json_data.keys()
+
+    # cache purge
+    ret = mips_api.lambda_handler(purge_event, "")
+    assert ret['statusCode'] == 201
+    json_data = json.loads(ret["body"])
+    assert json_data == 'success'
+
+    mips_api.s3_cache.purge_cache.side_effect = Exception
+    ret = mips_api.lambda_handler(purge_event, "")
+    assert ret['statusCode'] == 500
+    json_data = json.loads(ret["body"])
+    assert 'error' in json_data.keys()
+
+    # invalid event / no path
+    ret = mips_api.lambda_handler({}, "")
+    assert ret['statusCode'] == 400
+
+    json_data = json.loads(ret["body"])
+    assert json_data == {'error': 'No event path found'}
+
+    # no secrets
+    mips_api.mips_app.has_secrets.return_value = False
+    ret = mips_api.lambda_handler({}, "")
+    assert ret['statusCode'] == 500
+
+    json_data = json.loads(ret["body"])
+    assert json_data == {'error': 'No SSM secrets loaded'}
