@@ -47,11 +47,20 @@ def lambda_handler(event, context):
     if 'path' in event:
         event_path = event['path']
 
-        try:
-            mips_data = mips_app.get_mips_data(event_path)
-        except Exception as exc:
-            return _build_return(500, {"error": str(exc)})
+        if event_path in mips.App.admin_routes:
+            try:
+                mips_app.admin_action(event_path)
+                return _build_return(201, "success")
+            except Exception as exc:
+                return _build_return(500, {"error": str(exc)})
 
-        return _build_return(200, mips_data)
+        cache_routes = mips_app._get_cache_routes()
+        if event_path in cache_routes:
+            try:
+                mips_data = mips_app.get_mips_data(event_path)
+            except Exception as exc:
+                return _build_return(500, {"error": str(exc)})
+            return _build_return(200, mips_data)
 
+        return _build_return(404, {"error": "Invalid request path"})
     return _build_return(400, {"error": "Invalid event: No path found"})

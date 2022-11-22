@@ -1,5 +1,7 @@
-import mips_api
+from mips_api import cache
+from mips_api import mips
 
+import json
 import os
 
 import boto3
@@ -9,14 +11,23 @@ from botocore.stub import Stubber
 
 def test_mips(mocker, requests_mock):
 
-    # request path
+    # valid request path
     request_path = '/all/costcenters.json'
+
+    # invalid request path
+    invalid_path = '/invalid/path'
+
+    # admin purge action  path
+    purge_action = '/cache/purge'
 
     # mock secure parameters
     ssm_path = 'test/path'
     ssm_secrets = {
         'user': 'test',
         'pass': 'test',
+    }
+    ssm_param_results = {
+        'Parameters': [ {'Name': k, 'Value': v} for k, v in ssm_secrets.items() ]
     }
     ssm_param_results = {
         'Parameters': [ {'Name': k, 'Value': v} for k, v in ssm_secrets.items() ]
@@ -66,16 +77,19 @@ def test_mips(mocker, requests_mock):
         '12345': 'Inactive',
         '56789': 'Also Inactive',
     }
+    expected_mips_json = json.dumps(expected_mips_dict)
 
+    # mock the S3Cache class
+    mips.App.s3_cache = mocker.MagicMock(spec=cache.S3Cache)
 
     # create requests mocks for mips
-    login_mock = requests_mock.post(mips_api.mips.App._mips_url_login, json=mips_login_data)
-    chart_mock = requests_mock.get(mips_api.mips.App._mips_url_chart, json=mips_chart_data)
-    logout_mock = requests_mock.post(mips_api.mips.App._mips_url_logout)
+    login_mock = requests_mock.post(mips.App._mips_url_login, json=mips_login_data)
+    chart_mock = requests_mock.get(mips.App._mips_url_chart, json=mips_chart_data)
+    logout_mock = requests_mock.post(mips.App._mips_url_logout)
 
     # stub ssm client
     ssm = boto3.client('ssm')
-    mips_api.mips.App.ssm_client = ssm
+    mips.App.ssm_client = ssm
     with Stubber(ssm) as stub_ssm:
         stub_ssm.add_response('get_parameters_by_path', ssm_param_results)
 
@@ -89,7 +103,7 @@ def test_mips(mocker, requests_mock):
         os.environ['apiAllCostCenters'] = request_path
 
         # create object under test
-        mips_app = mips_api.mips.App()
+        mips_app = mips.App()
 
         # collect secure parameters
         mips_app.collect_secrets()
@@ -97,17 +111,42 @@ def test_mips(mocker, requests_mock):
         stub_ssm.assert_no_pending_responses()
 
         # get chart of accouts from mips
-        mips_app.get_mips_data(request_path)
+        mips_app._collect_mips_data()
         assert mips_app.mips_dict == expected_mips_dict
         assert login_mock.call_count == 1
         assert chart_mock.call_count == 1
         assert logout_mock.call_count == 1
 
-        # exception getting chart of accounts
-        requests_mock.get(mips_api.mips.App._mips_url_chart, exc=Exception)
+        # exercies exception getting chart of accounts
+        requests_mock.get(mips.App._mips_url_chart, exc=Exception)
         with pytest.raises(Exception):
             mips_app._collect_mips_data()
         assert logout_mock.call_count == 2
+
+        # cache hit
+        mips.App.s3_cache.get_cache.return_value = expected_mips_json
+        mips_cache = json.loads(mips_app.get_mips_data(request_path))
+        assert mips_cache == expected_mips_dict
+        mips.App.s3_cache.put_cache.assert_not_called()
+
+        # cache miss
+        mips.App.s3_cache.get_cache.side_effect = Exception
+        mips_json = mips_app.get_mips_data(request_path)
+        mips_dict = json.loads(mips_json)
+        assert mips_dict == expected_mips_dict
+        mips.App.s3_cache.put_cache.assert_called_with(request_path, mips_json)
+
+        # get invalid cache path
+        with pytest.raises(Exception):
+            mips_app.get_mips_data(invalid_path)
+
+        # cache purge
+        mips_app.admin_action(purge_action)
+        mips.App.s3_cache.purge_cache.assert_called()
+
+        # get invalid admin action
+        with pytest.raises(Exception):
+            mips_app.admin_action(invalid_path)
 
         # secrets are invalid
         mips_app._ssm_secrets = {'foo': 'bar'}

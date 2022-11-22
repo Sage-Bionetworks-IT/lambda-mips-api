@@ -66,20 +66,37 @@ def test_event():
     return apigw_event('/test/path')
 
 
-def test_lambda_handler(test_event, mocker):
+@pytest.fixture()
+def invalid_event():
+    return apigw_event('/invalid/path')
+
+
+@pytest.fixture()
+def cache_purge_event():
+    return apigw_event('/cache/purge')
+
+
+def test_lambda_handler(test_event, invalid_event, cache_purge_event, mocker):
     # mock the App class
     mips_api.mips_app = mocker.MagicMock(spec=mips_api.mips.App)
 
     # invalid event / no path
     ret = mips_api.lambda_handler({}, "")
     assert ret['statusCode'] == 400
-
     json_data = json.loads(ret["body"])
     assert json_data == {'error': 'Invalid event: No path found'}
 
+    # invalid event / invalid path
+    ret = mips_api.lambda_handler(invalid_event, "")
+    assert ret['statusCode'] == 404
+    json_data = json.loads(ret["body"])
+    assert json_data == {'error': 'Invalid request path'}
+
     # success
     success = 'test success'
+    routes = [ '/test/path', ]
     mips_api.mips_app.get_mips_data.return_value = success
+    mips_api.mips_app._get_cache_routes.return_value = routes
     ret = mips_api.lambda_handler(test_event, "")
     assert ret['statusCode'] == 200
 

@@ -3,7 +3,13 @@ An AWS Lambda microservice presenting MIPS chart of accounts data
 
 ## Architecture
 
-![Component Diagram](docs/lambda-mips-api_components.drawio.png)
+This lambda consolidates access to a third-party system, providing a read-only view into data that rarely changes.
+
+And to reduce our reliance on systems external to AWS, we maintain a long-lived response cache in S3.
+
+![Cache Hit](docs/lambda-mips-api_cache-hit.drawio.png)
+![Cache Miss](docs/lambda-mips-api_cache-miss.drawio.png)
+![Cache Purge](docs/lambda-mips-api_cache-purge.drawio.png)
 
 ## Required Secure Parameters
 
@@ -22,16 +28,31 @@ The following template parameters are set as environment variables in the lambda
 
 ## Triggering
 
-The CloudFormation template will output the endpoint URL that can be loaded in a browser, e.g.:
-`https://57lejqxw32.execute-api.us-east-1.amazonaws.com/Prod/all/costcenters.json`
+The CloudFormation template will output endpoint URLs for each supported API route.
 
-## Respones Format
+### Retrieving Cost Centers
+
+Currently only one output format is supported: an unfiltered mapping of all cost center codes.
+The endpoint URL for this format is given in the output `ApiRouteAllCostCenters`, e.g.:
+```
+https://57lejqxw32.execute-api.us-east-1.amazonaws.com/Prod/all/costcenters.json
+```
+
+#### Respones Format
 
 The API will return a json string representing a dictionary mapping program codes to their names.
 E.g.:
 ```json
 {"000000": "No Program", "990300": "Program Infrastructure"}
 ```
+
+### Cache Administration
+
+The `ApiRouteCachePurge` output provides an endpoint URL that will trigger the lambda to delete all objects
+from its cache, and requires an HTTP DELETE request.
+
+#### Respones Format
+The API will return success or failure of the underlying operation.
 
 ## Development
 

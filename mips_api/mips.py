@@ -1,3 +1,6 @@
+from mips_api import cache
+
+import json
 import os
 
 import boto3
@@ -9,21 +12,31 @@ class App:
     _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'
     _mips_url_logout = 'https://mipapi.abilaonline.com/api/security/logout'
 
+    s3_cache = None
+
     ssm_client = None
 
     required_secrets = [ 'user', 'pass' ]
 
+    admin_routes = [
+        '/cache/purge',
+    ]
+
+
     def __init__(self):
+        if App.s3_cache is None:
+            App.s3_cache = cache.S3Cache()
+
         if App.ssm_client is None:
             App.ssm_client = boto3.client('ssm')
 
         self._ssm_secrets = None
         self._mips_org = None
         self.mips_dict = {}
-        self.valid_routes = []
+        self.valid_routes = {}
 
         try:
-            self.valid_routes.append(os.environ['apiAllCostCenters'])
+            self.valid_routes['allCostCenters'] = os.environ['apiAllCostCenters']
         except KeyError:
             raise Exception("The environment variable 'apiAllCostCenters' must be set.")
 
@@ -111,12 +124,58 @@ class App:
                 headers={"Authorization-Token":access_token},
             )
 
-    def get_mips_data(self, lookup):
-        '''TODO: implement cache lookup'''
-        if lookup not in self.valid_routes:
-            raise Exception(f"Invalid request: {lookup}")
+    def admin_action(self, action):
+        '''
+        Entry point
 
+        Returns
+            None
+
+        Raises
+            Exception: for any invalid request
+        '''
+        if action not in App.admin_routes:
+            raise Exception(f"Invalid admin acton: {action}")
+
+        if action == '/cache/purge':
+            App.s3_cache.purge_cache()
+
+    def _get_cache_routes(self):
+        return self.valid_routes.values()
+
+    def get_mips_data(self, lookup):
+        '''
+        Entry point
+
+        Returns
+            The body of the requested object
+
+        Raises
+            Exception: for any invalid request
+        '''
+
+        cache_routes = self._get_cache_routes()
+
+        if lookup not in cache_routes:
+            raise Exception(f"Invalid cache route: {lookup}")
+
+        # Check for an existing valid cache object
+        try:
+            existing = App.s3_cache.get_cache(lookup)
+            return existing
+        except Exception as exc:
+            print(f"Cache read exception: {exc}")
+
+        # Query MIPS if needed
         if not self.mips_dict:
             self._collect_mips_data()
+        data = json.dumps(self.mips_dict)
 
-        return self.mips_dict
+        # Update the cache object
+        try:
+            App.s3_cache.put_cache(lookup, data)
+        except Exception as exc:
+            print(f"Cache write exception: {exc}")
+
+        # Return the object body
+        return data
