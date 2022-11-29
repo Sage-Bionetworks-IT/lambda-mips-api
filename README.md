@@ -4,8 +4,11 @@ An AWS Lambda microservice presenting MIPS chart of accounts data
 ## Architecture
 
 This microservice is designed to retrieve a chart of accounts from a third-party API and present the data in a useful format.
-The initial implementation formats all accounts into a JSON string,
-future iterations will add formats to replace existing static files and filter out inactive accounts.
+
+Formats available:
+* A dictionary mapping all active and inactive accounts to their friendly names.
+* A list of valid values for our `CostCenter` tag.
+* A list of valid values for either `CostCenter` or `CostCenterOther` tags.
 
 Since we reach out to a third-party API across the internet, responses are cached to minimize interaction with the API
 and mitigate potential environmental issues (e.g. packet loss).

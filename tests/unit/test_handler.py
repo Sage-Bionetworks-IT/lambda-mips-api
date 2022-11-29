@@ -86,13 +86,16 @@ def test_lambda_handler(test_event, mocker):
     json_data = json.loads(ret["body"])
     assert json_data == {'error': 'Invalid event: No path found: {}'}
 
+    # inject test path as valid route
+    mips_api.mips_app.valid_routes.return_value = [ '/test/path', ]
+
     # success
     success = 'test success'
     mips_api.mips_app.get_mips_data.return_value = success
     ret = mips_api.lambda_handler(test_event, "")
     assert ret['statusCode'] == 200
 
-    json_data = json.loads(ret["body"])
+    json_data = ret["body"]
     assert json_data == success
 
     mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])

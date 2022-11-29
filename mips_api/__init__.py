@@ -40,11 +40,17 @@ def lambda_handler(event, context):
             "body": "Missing environment variable: CacheTTL",
         }
 
-    # helper function to structure return data and set cache control
-    def _build_return(code, body):
+    # helper functions to encapsulate the body, headers, and status code
+    def _return_dict(code, body):
         return {
             "statusCode": code,
             "body": json.dumps(body),
+            "headers": {"cache-control": f"max-age={cache_age}"},
+        }
+    def _return_json(code, body):
+        return {
+            "statusCode": code,
+            "body": body,
             "headers": {"cache-control": f"max-age={cache_age}"},
         }
 
@@ -55,17 +61,18 @@ def lambda_handler(event, context):
             mips_app = mips.App()
         mips_app.collect_secrets()
     except Exception as exc:
-        return _build_return(500, {"error": str(exc)})
+        return _return_dict(500, {"error": str(exc)})
 
     # parse the path and get the data
     if 'path' in event:
         event_path = event['path']
+        valid_routes = mips_app.valid_routes()
+        if event_path in valid_routes:
+            try:
+                mips_data = mips_app.get_mips_data(event_path)
+            except Exception as exc:
+                return _return_dict(500, {"error": str(exc)})
+            return _return_json(200, mips_data)
 
-        try:
-            mips_data = mips_app.get_mips_data(event_path)
-        except Exception as exc:
-            return _build_return(500, {"error": str(exc)})
-
-        return _build_return(200, mips_data)
-
-    return _build_return(400, {"error": f"Invalid event: No path found: {event}"})
+        return _return_dict(404, {"error": "Invalid request path"})
+    return _return_dict(400, {"error": f"Invalid event: No path found: {event}"})

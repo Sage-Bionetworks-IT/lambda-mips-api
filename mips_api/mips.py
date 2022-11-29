@@ -1,3 +1,4 @@
+import json
 import os
 
 import boto3
@@ -9,9 +10,56 @@ class App:
     _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'
     _mips_url_logout = 'https://mipapi.abilaonline.com/api/security/logout'
 
+    # distinguish `CostCenter` from `CostCenterOther`
+    _main_program_codes = [
+        '101300',  # CSBC - NCI
+        '101400',  # AoU - Scripps
+        '101600',  # NIH-ITCR
+        '112501',  # Mobile Toolbox Project Core
+        '119400',  # Depression-Emory Wingo
+        '120100',  # HTAN-DFCI
+        '121700',  # HTAN Supp DFCI
+        '122000',  # INCLUDE - CHOP
+        '122100',  # NF - DoD w/UCF
+        '122300',  # Emory Diversity Cohorts
+        '312000',  # Genie-AACR
+        '314900',  # iAtlas 3
+        '401900',  # Digital Accelerators-ADDF
+        '506800',  # NLP CH - Celgene
+        '613500',  # Psorcast Pscrosis App
+        '990100',  # General + Administrative
+        '990300',  # Platform Infrastructure
+        '990400',  # Governance
+    ]
+
+    # add these meta codes as valid `CostCenter` values
+    _extra_program_codes = {
+        '000000':  'No Program',
+        '000001':  'Other',
+    }
+
+    # ignore these active codes
+    _omit_program_codes = [
+        '999900',  # unfunded
+        '999800',  # salary cap
+        '999700',  # long term leave
+        '990500',  # program management
+    ]
+
+    # inactive codes that we still need
+    _legacy_program_codes = [
+        '30144',
+    ]
+
     ssm_client = None
 
     required_secrets = [ 'user', 'pass' ]
+
+    def _get_os_var(self, varnam):
+        try:
+            return os.environ[varnam]
+        except KeyError as exc:
+            raise Exception(f"The environment variable '{varnam}' must be set")
 
     def __init__(self):
         if App.ssm_client is None:
@@ -20,22 +68,18 @@ class App:
         self._ssm_secrets = None
         self._mips_org = None
         self.mips_dict = {}
-        self.valid_routes = []
+        self.valid_routes = {}
 
-        try:
-            self.valid_routes.append(os.environ['apiAllCostCenters'])
-        except KeyError:
-            raise Exception("The environment variable 'apiAllCostCenters' must be set.")
+        self._mips_org = self._get_os_var('MipsOrg')
+        self.ssm_path = self._get_os_var('SsmPath')
 
-        try:
-            self._mips_org = os.environ['MipsOrg']
-        except KeyError:
-            raise Exception("The environment variable 'MipsOrg' must be set.")
-
-        try:
-            self.ssm_path = os.environ['SsmPath']
-        except KeyError:
-            raise Exception("The environment variable 'SsmPath' must be set.")
+        api_routes = [
+            'apiAllCostCenters',
+            'apiProgramCodes',
+            'apiProgramCodesAll',
+        ]
+        for route_name in api_routes:
+            self.valid_routes[route_name] = self._get_os_var(route_name)
 
     def collect_secrets(self):
         '''Collect secure parameters'''
@@ -67,6 +111,7 @@ class App:
     def _collect_mips_data(self):
         '''Log into MIPS, get the chart of accounts, and log out'''
 
+        access_token = None
         try:
             # get mips access token
             mips_creds = {
@@ -111,12 +156,96 @@ class App:
                 headers={"Authorization-Token":access_token},
             )
 
-    def get_mips_data(self, lookup):
-        '''TODO: implement cache lookup'''
-        if lookup not in self.valid_routes:
-            raise Exception(f"Invalid request: {lookup}")
+    def _mips_dict_json(self):
+        '''
+        Transform the full chart of accounts into JSON
+        '''
+        return json.dumps(self.mips_dict, indent=2)
 
+    def _service_catalog_json(self):
+        '''
+        Transform data into a format for service catalog tag options
+
+        Include only values for the `CostCenter` tag, excluding values for the `CostCenterOther` tag.
+
+        Returns
+            A JSON string representing an array of strings in the format `{Program Name} / {Program Code}`
+        '''
+
+        data = []
+
+        for code, name in self.mips_dict.items():
+            short = code[:6]  # ignore the last two digits on active codes
+
+            if short in App._main_program_codes:
+                title = f"{name} / {short}"
+                if title not in data:
+                    data.append(title)
+
+        for code, name in App._extra_program_codes.items():
+            data.append(f"{name} / {code}")
+
+        return json.dumps(data, indent=2)
+
+    def _service_catalog_all_json(self):
+        '''
+        Transform data into a format for service catalog tag validation
+
+        Include values for both the `CostCenter` and `CostCenterOther` tags.
+
+        Returns
+            A JSON string representing an array of strings in the format `{Program Name} / {Program Code}`
+        '''
+
+        data = []
+
+        for code, name in App._extra_program_codes.items():
+            data.append(f"{name} / {code}")
+
+        for code, name in self.mips_dict.items():
+            if code in App._legacy_program_codes or len(code) > 5:
+                short = code[:6]  # ignore the last two digits on active codes
+                if short not in App._omit_program_codes:
+                    title = f"{name} / {short}"
+                    if title not in data:
+                        data.append(title)
+
+        return json.dumps(data, indent=2)
+
+    def valid_routes(self):
+        '''
+        List all valid routes
+        '''
+        return self.valid_routes.values()
+
+    def _get_mips_data(self, lookup):
+        '''
+        Process MIPS data into requested format
+        '''
+
+        if lookup == self.valid_routes['apiAllCostCenters']:
+            return self._mips_dict_json()
+
+        if lookup == self.valid_routes['apiProgramCodes']:
+            return self._service_catalog_json()
+
+        if lookup == self.valid_routes['apiProgramCodesAll']:
+            return self._service_catalog_all_json()
+
+    def get_mips_data(self, lookup):
+        '''
+        Entry point for retrieving data
+
+        Returns
+            The body of the requested object
+        '''
+
+        # Query MIPS if needed
         if not self.mips_dict:
             self._collect_mips_data()
 
-        return self.mips_dict
+        # Collect requested data
+        data = self._get_mips_data(lookup)
+
+        # Return the object body
+        return data

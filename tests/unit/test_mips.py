@@ -1,5 +1,6 @@
 import mips_api
 
+import json
 import os
 
 import boto3
@@ -9,8 +10,10 @@ from botocore.stub import Stubber
 
 def test_mips(mocker, requests_mock):
 
-    # request path
-    request_path = '/all/costcenters.json'
+    # valid request paths
+    cost_centers_path = '/test/costcenters.json'
+    program_codes_path = '/test/ProgramCodes.json'
+    program_codes_all_path = '/test/ProgramCodesAll.json'
 
     # mock secure parameters
     ssm_path = 'test/path'
@@ -31,20 +34,12 @@ def test_mips(mocker, requests_mock):
     mips_chart_data = {
         'data': [
             {
-                'accountCodeId': '000000',
-                'accountTitle': 'No Program',
+                'accountCodeId': '12345600',
+                'accountTitle': 'Other Program A',
             },
             {
-                'accountCodeId': '990300',
-                'accountTitle': 'Platform Infrastructure',
-            },
-            {
-                'accountCodeId': '999900',
-                'accountTitle': 'Unfunded',
-            },
-            {
-                'accountCodeId': '123456',
-                'accountTitle': 'Other Program',
+                'accountCodeId': '12345601',
+                'accountTitle': 'Other Program B',
             },
             {
                 'accountCodeId': '12345',
@@ -52,21 +47,47 @@ def test_mips(mocker, requests_mock):
             },
             {
                 'accountCodeId': '56789',
-                'accountTitle': 'Also Inactive',
+                'accountTitle': 'Legacy',
+            },
+            {
+                'accountCodeId': '99030000',
+                'accountTitle': 'Platform Infrastructure',
+            },
+            {
+                'accountCodeId': '99990000',
+                'accountTitle': 'Unfunded',
             },
         ]
     }
 
     # expected result
     expected_mips_dict = {
-        '000000': 'No Program',
-        '123456': 'Other Program',
-        '990300': 'Platform Infrastructure',
-        '999900': 'Unfunded',
+        '12345600': 'Other Program A',
+        '12345601': 'Other Program B',
         '12345': 'Inactive',
-        '56789': 'Also Inactive',
+        '56789': 'Legacy',
+        '99030000': 'Platform Infrastructure',
+        '99990000': 'Unfunded',
     }
 
+    # overwrite hard-coded values
+    mips_api.mips.App._legacy_program_codes = [ '56789', ]
+    mips_api.mips.App._main_program_codes = [ '990300', ]
+
+    expected_program_codes = [
+        'Platform Infrastructure / 990300',
+        'No Program / 000000',
+        'Other / 000001',
+    ]
+
+    expected_program_codes_all = [
+        'No Program / 000000',
+        'Other / 000001',
+        'Other Program A / 123456',
+        'Other Program B / 123456',
+        'Legacy / 56789',
+        'Platform Infrastructure / 990300',
+    ]
 
     # create requests mocks for mips
     login_mock = requests_mock.post(mips_api.mips.App._mips_url_login, json=mips_login_data)
@@ -81,12 +102,14 @@ def test_mips(mocker, requests_mock):
 
         # init failure: missing env vars
         with pytest.raises(Exception):
-            mips_app = mips.App()
+            mips_app = mips_api.mips.App()
 
         # inject needed env vars
         os.environ['MipsOrg'] = 'testOrg'
         os.environ['SsmPath'] = ssm_path
-        os.environ['apiAllCostCenters'] = request_path
+        os.environ['apiAllCostCenters'] = cost_centers_path
+        os.environ['apiProgramCodes'] = program_codes_path
+        os.environ['apiProgramCodesAll'] = program_codes_all_path
 
         # create object under test
         mips_app = mips_api.mips.App()
@@ -97,7 +120,7 @@ def test_mips(mocker, requests_mock):
         stub_ssm.assert_no_pending_responses()
 
         # get chart of accouts from mips
-        mips_app.get_mips_data(request_path)
+        mips_app.get_mips_data(cost_centers_path)
         assert mips_app.mips_dict == expected_mips_dict
         assert login_mock.call_count == 1
         assert chart_mock.call_count == 1
@@ -108,6 +131,20 @@ def test_mips(mocker, requests_mock):
         with pytest.raises(Exception):
             mips_app._collect_mips_data()
         assert logout_mock.call_count == 2
+
+        # service catalog transform (main)
+        main_json = mips_app._service_catalog_json()
+        main_list = json.loads(main_json)
+        assert main_list == expected_program_codes
+
+        # service catalog transform (all)
+        all_json = mips_app._service_catalog_all_json()
+        all_list = json.loads(all_json)
+        assert all_list == expected_program_codes_all
+
+        # get invalid path
+        with pytest.raises(Exception):
+            mips_app.get_mips_data(invalid_path)
 
         # secrets are invalid
         mips_app._ssm_secrets = {'foo': 'bar'}
