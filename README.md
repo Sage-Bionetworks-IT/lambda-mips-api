@@ -10,6 +10,7 @@ Formats available:
 | --- | --- |
 | /accounts | A dictionary mapping all active and inactive accounts to their friendly names (for debugging). |
 | /tags | A list of valid tag values for either `CostCenter` or `CostCenterOther`. |
+| /rules | A CloudFormation snippet to be consumed by `cfn-macro-cost-rules`. |
 
 Since we reach out to a third-party API across the internet, responses are cached to minimize interaction with the API
 and mitigate potential environmental issues (e.g. packet loss).

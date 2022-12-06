@@ -6,6 +6,10 @@ import os
 import boto3
 import pytest
 from botocore.stub import Stubber
+from ruamel.yaml import YAML
+
+# create global object for processing YAML
+yaml = YAML(typ='safe')
 
 
 # fixtures that don't need a setup function
@@ -13,10 +17,12 @@ from botocore.stub import Stubber
 # environment variables
 api_accounts = '/test/accounts'
 api_tags = '/test/tags'
+api_rules = '/test/rules'
 org_name = 'testOrg'
 ssm_path = 'secret/path'
 omit_codes = '999900,999800'
 extra_codes = '000000:No Program,000001:Other'
+costcenter_tags = 'CostCenterOther,CostCenter'
 
 # neither api_accounts nor api_tags
 api_invalid = '/test/invalid'
@@ -30,6 +36,11 @@ expected_extra_codes = {
     '000000': 'No Program',
     '000001': 'Other',
 }
+
+costcenter_tag_list = [
+    'CostCenterOther',
+    'CostCenter',
+]
 
 # mock secrets (good)
 mock_secrets = {
@@ -87,13 +98,21 @@ mock_chart = {
     ]
 }
 
-# expected internal dictionary
-expected_mips_dict = {
+# expected raw chart of accounts
+expected_raw_dict = {
     '12345600': 'Other Program A',
     '12345601': 'Other Program B',
     '54321': 'Inactive',
     '99030000': 'Platform Infrastructure',
     '99990000': 'Unfunded',
+}
+
+# expected processed chart of accounts
+expected_mips_dict = {
+    '000000': 'No Program',
+    '000001': 'Other',
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
 }
 
 # expected tag list
@@ -109,6 +128,51 @@ mock_limit_param = { 'limit': 3 }
 
 # expected tag list with limit
 expected_tag_limit_list = expected_tag_list[0:3]
+
+mock_account_tags = {
+    '123456': [
+        '111222333444',
+    ],
+    '990300': [
+        '555666777888',
+    ],
+}
+
+# expected rules macro snippet
+expected_rules = {
+    'RegularValues': [
+        {
+            'Value': '000000 No Program',
+            'TagNames': [ 'CostCenterOther', 'CostCenter' ],
+            'TagEndsWith': [ '000000', ],
+            'TagStartsWith': [ '000000', ],
+        },
+        {
+            'Value': '000001 Other',
+            'TagNames': [ 'CostCenterOther', 'CostCenter' ],
+            'TagEndsWith': [ '000001', ],
+            'TagStartsWith': [ '000001', ],
+        },
+        {
+            'Value': '123456 Other Program A',
+            'TagNames': [ 'CostCenterOther', 'CostCenter' ],
+            'TagEndsWith': [ '123456', ],
+            'TagStartsWith': [ '123456', ],
+            'Accounts': [ '111222333444', ],
+        },
+        {
+            'Value': '990300 Platform Infrastructure',
+            'TagNames': [ 'CostCenterOther', 'CostCenter' ],
+            'TagEndsWith': [ '990300', ],
+            'TagStartsWith': [ '990300', ],
+            'Accounts': [ '555666777888', ],
+        },
+    ],
+    'InheritedValues': {
+        'RulePosition': 'Last',
+        'TagOrder': [ 'CostCenterOther', 'CostCenter' ],
+    },
+}
 
 
 def apigw_event(path, qsp={"foo": "bar"}):
@@ -187,6 +251,10 @@ def tags_limit_event():
     return apigw_event(api_tags, qsp=mock_limit_param)
 
 
+@pytest.fixture()
+def rules_event():
+    return apigw_event(api_rules)
+
 
 def test_secrets(mocker):
     '''Test getting secret parameters from SSM'''
@@ -230,7 +298,7 @@ def test_bad_secrets():
             secrets = mips_api.collect_secrets(ssm_path)
 
 
-def test_chart(requests_mock):
+def test_collect_chart(requests_mock):
     '''
     Test getting chart of accounts from upstream API
 
@@ -249,7 +317,7 @@ def test_chart(requests_mock):
     mips_dict = mips_api.collect_chart(org_name, mock_secrets)
 
     # assert expected data
-    assert mips_dict == expected_mips_dict
+    assert mips_dict == expected_raw_dict
 
     # assert all mock urls were called
     assert login_mock.call_count == 1
@@ -267,30 +335,52 @@ def test_chart(requests_mock):
     assert logout_mock.call_count == 2
 
 
-def test_parse_omit():
-    parsed_omit_codes = mips_api._parse_omit_codes(omit_codes)
+def test_process_chart():
+    '''Test processing  codes to add / remove'''
+
+    # assert expected chart of accounts
+    processed_chart = mips_api.process_chart(expected_raw_dict, expected_omit_codes, expected_extra_codes)
+    assert processed_chart == expected_mips_dict
+
+
+def test_parse_env_list():
+    '''Test parsing CodesToOmit environment variable'''
+
+    # assert expected omit codes
+    parsed_omit_codes = mips_api._parse_env_list(omit_codes)
     assert parsed_omit_codes == expected_omit_codes
 
 
-def test_parse_extra():
-    parsed_extra_codes = mips_api._parse_extra_codes(extra_codes)
+def test_parse_env_dict():
+    '''Test parsing CodesToAdd environment variable'''
+
+    # assert expected extra codes
+    parsed_extra_codes = mips_api._parse_env_dict(extra_codes)
     assert parsed_extra_codes == expected_extra_codes
 
 
 def test_tags():
-    '''Testing building tag list from collected chart of accounts'''
+    '''Testing building tag list from processed chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(None, expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    tag_list = mips_api.list_tags(None, expected_mips_dict)
     assert tag_list == expected_tag_list
 
 
 def test_tags_limit():
-    '''Testing building tag list from collected chart of accounts'''
+    '''Testing building tag list from processed chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(mock_limit_param, expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    tag_list = mips_api.list_tags(mock_limit_param, expected_mips_dict)
     assert tag_list == expected_tag_limit_list
+
+
+def test_rules():
+    '''Testing building rules snippet from processed chart of accounts'''
+
+    # assert expected rules
+    rules_snippet = mips_api.list_rules(None, expected_mips_dict, costcenter_tag_list)
+    assert rules_snippet == expected_rules
 
 
 def test_lambda_handler_no_env(invalid_event):
@@ -310,6 +400,8 @@ def _test_with_env(mocker, event, code, body=None, error=None):
         'SsmPath': ssm_path,
         'ApiChartOfAccounts': api_accounts,
         'ApiValidTags': api_tags,
+        'ApiCostCategoryRules': api_rules,
+        'CostCenterTags': costcenter_tags,
         'CodesToOmit': omit_codes,
         'CodesToAdd': extra_codes,
     }
@@ -323,17 +415,34 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     # mock out collect_chart() with mock chart
     mocker.patch('mips_api.collect_chart',
                  autospec=True,
+                 return_value=expected_raw_dict)
+
+    # mock out process_chart() with expected chart
+    mocker.patch('mips_api.process_chart',
+                 autospec=True,
                  return_value=expected_mips_dict)
+
+    # mock out collect_account_tags() with mock tags
+    mocker.patch('mips_api.collect_account_tags',
+                 autospec=True,
+                 return_value=mock_account_tags)
 
     # test event
     ret = mips_api.lambda_handler(event, None)
-    json_body = json.loads(ret["body"])
+
+    # unpack body based on content-type
+    if ret['headers']['content-type'].startswith('text/json'):
+        _body = json.loads(ret["body"])
+    elif ret['headers']['content-type'].startswith('text/vnd.yaml'):
+        _body = yaml.load(ret["body"])
+    else:
+        _body = ret["body"]
 
     if error is not None:
-        assert json_body['error'] == error
+        assert _body['error'] == error
 
     elif body is not None:
-        assert json_body == body
+        assert _body == body
 
     assert ret['statusCode'] == code
 
@@ -353,10 +462,31 @@ def test_lambda_handler_accounts(accounts_event, mocker):
 def test_lambda_handler_tags(tags_event, mocker):
     '''Test tag-list event'''
 
+    # mock out list_tags() with mock tags
+    mocker.patch('mips_api.list_tags',
+                 autospec=True,
+                 return_value=expected_tag_list)
+
     _test_with_env(mocker, tags_event, 200, body=expected_tag_list)
 
 
 def test_lambda_handler_tags_limit(tags_limit_event, mocker):
-    '''Test tag-list event'''
+    '''Test tag-list event with limit paramater'''
+
+    # mock out list_tags() with mock tags
+    mocker.patch('mips_api.list_tags',
+                 autospec=True,
+                 return_value=expected_tag_limit_list)
 
     _test_with_env(mocker, tags_limit_event, 200, body=expected_tag_limit_list)
+
+
+def test_lambda_handler_rules(rules_event, mocker):
+    '''Test rule-list event'''
+
+    # mock out list_rules() with mock tags
+    mocker.patch('mips_api.list_rules',
+                 autospec=True,
+                 return_value=expected_rules)
+
+    _test_with_env(mocker, rules_event, 200, body=expected_rules)

@@ -35,6 +35,10 @@ Parameters:
     Type: String
     Description: Comma-delimited list of code:name pairs to add to the active list.
     Default: '000000:No Program,000001:Other'
+  CostCenterTags:
+    Type: String
+    Description: Comma-delimited list of AWS tags that may be used for labelling cost centers, in priority order.
+    Default: 'CostCenterOther,CostCenter'
 
 Resources:
   Function:
@@ -47,11 +51,13 @@ Resources:
         Variables:
           ApiChartOfAccounts: '/accounts'
           ApiValidTags: '/tags'
+          ApiCostCategoryRules: '/rules'
           CacheTTL: !Ref CacheTTL
           MipsOrg: !Ref MipsOrganization
           SsmPath: !Ref SsmParamPrefix
           CodesToOmit: !Ref CodesToOmit
           CodesToAdd: !Ref CodesToAdd
+          CostCenterTags: !Ref CostCenterTags
       Role: !GetAtt FunctionRole.Arn
       Events:
         ChartOfAccounts:
@@ -63,6 +69,11 @@ Resources:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             Path: '/tags'
+            Method: get
+        CostCategoryRules:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: '/rules'
             Method: get
 
   FunctionRole:   # execute lambda function with this role
@@ -182,6 +193,9 @@ Outputs:
   ApiRouteValidTags:
     Description: "CloudFront URL for listing valid CostCenter tag values"
     Value: !Sub "https://${CloudFrontCache.DomainName}/tags"
+  ApiRouteCostCategoryRules:
+    Description: "CloudFront URL for generating cost category transform snippet"
+    Value: !Sub "https://${CloudFrontCache.DomainName}/rules"
   OriginUrl:
     Description: "API Gateway origin URL with stage (for debugging)"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

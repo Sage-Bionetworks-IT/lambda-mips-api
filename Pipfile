@@ -12,6 +12,7 @@ boto3 = "~=1.24"
 
 [packages]
 requests = "~=2.0"
+"ruamel.yaml" = "~=0.17"
 
 [requires]
 python_version = "3.9"
