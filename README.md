@@ -1,11 +1,37 @@
-# lambda-template
-A GitHub template for quickly starting a new AWS lambda project.
+# lambda-mips-api
+An AWS Lambda microservice presenting MIPS chart of accounts data
 
-## Naming
-Naming conventions:
-* for a vanilla Lambda: `lambda-<context>`
-* for a Cloudformation Transform macro: `cfn-macro-<context>`
-* for a Cloudformation Custom Resource: `cfn-cr-<context>`
+## Architecture
+
+![Component Diagram](docs/lambda-mips-api_components.drawio.png)
+
+## Required Secure Parameters
+
+User credentials for logging in to the finance system are stored as secure parameters with a configurable prefix.
+By default, the prefix is `/lambda/mipsSecret`, resulting the following required secure parameters:
+* `/lambda/mipsSecret/user`
+* `/lambda/mipsSecret/pass`
+
+## Template Parameters
+
+The following template parameters are set as environment variables in the lambda environment:
+| Template Parameter | Environment Variable | Description |
+| --- | --- | --- |
+| SsmParamPrefix | SsmPath | Path prefix for secure parameters |
+| MipsOrganization | MipsOrg | Log in to this organization in the finance system |
+
+## Triggering
+
+The CloudFormation template will output the endpoint URL that can be loaded in a browser, e.g.:
+`https://57lejqxw32.execute-api.us-east-1.amazonaws.com/Prod/all/costcenters.json`
+
+## Respones Format
+
+The API will return a json string representing a dictionary mapping program codes to their names.
+E.g.:
+```json
+{"000000": "No Program", "990300": "Program Infrastructure"}
+```
 
 ## Development
 
@@ -48,7 +74,7 @@ Tests are defined in the `tests` folder in this project. Use PIP to install the
 [pytest](https://docs.pytest.org/en/latest/) and run unit tests.
 
 ```shell script
-$ python -m pytest tests/ -v
+$ python -m pytest tests/ -s -v
 ```
 
 ### Run integration tests
@@ -56,7 +82,7 @@ Running integration tests
 [requires docker](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-local-start-api.html)
 
 ```shell script
-$ sam local invoke HelloWorldFunction --event events/event.json
+$ sam local invoke Function --event events/event.json
 ```
 
 ## Deployment
@@ -71,9 +97,9 @@ which requires permissions to upload to Sage
 ```shell script
 sam package --template-file .aws-sam/build/template.yaml \
   --s3-bucket essentials-awss3lambdaartifactsbucket-x29ftznj6pqw \
-  --output-template-file .aws-sam/build/lambda-template.yaml
+  --output-template-file .aws-sam/build/lambda-mips-api.yaml
 
-aws s3 cp .aws-sam/build/lambda-template.yaml s3://bootstrap-awss3cloudformationbucket-19qromfd235z9/lambda-template/master/
+aws s3 cp .aws-sam/build/lambda-mips-api.yaml s3://bootstrap-awss3cloudformationbucket-19qromfd235z9/lambda-mips-api/master/
 ```
 
 ## Publish Lambda
@@ -83,7 +109,7 @@ Publishing the lambda makes it available in your AWS account.  It will be access
 the [serverless application repository](https://console.aws.amazon.com/serverlessrepo).
 
 ```shell script
-sam publish --template .aws-sam/build/lambda-template.yaml
+sam publish --template .aws-sam/build/lambda-mips-api.yaml
 ```
 
 ### Public access
@@ -100,13 +126,13 @@ aws serverlessrepo put-application-policy \
 
 ### Sceptre
 Create the following [sceptre](https://github.com/Sceptre/sceptre) file
-config/prod/lambda-template.yaml
+config/prod/lambda-mips-api.yaml
 
 ```yaml
 template:
   type: http
-  url: "https://PUBLISH_BUCKET.s3.amazonaws.com/lambda-template/VERSION/lambda-template.yaml"
-stack_name: "lambda-template"
+  url: "https://PUBLISH_BUCKET.s3.amazonaws.com/lambda-mips-api/VERSION/lambda-mips-api.yaml"
+stack_name: "lambda-mips-api"
 stack_tags:
   Department: "Platform"
   Project: "Infrastructure"
@@ -115,7 +141,7 @@ stack_tags:
 
 Install the lambda using sceptre:
 ```shell script
-sceptre --var "profile=my-profile" --var "region=us-east-1" launch prod/lambda-template.yaml
+sceptre --var "profile=my-profile" --var "region=us-east-1" launch prod/lambda-mips-api.yaml
 ```
 
 ### AWS Console

@@ -1,12 +1,11 @@
+import mips_api
+
 import json
 
 import pytest
 
-from hello_world import app
 
-
-@pytest.fixture()
-def apigw_event():
+def apigw_event(path):
     """ Generates API GW Event"""
 
     return {
@@ -55,19 +54,56 @@ def apigw_event():
             "CloudFront-Forwarded-Proto": "https",
             "Accept-Encoding": "gzip, deflate, sdch",
         },
-        "pathParameters": {"proxy": "/examplepath"},
+        "pathParameters": {"proxy": path},
         "httpMethod": "POST",
         "stageVariables": {"baz": "qux"},
-        "path": "/examplepath",
+        "path": path,
     }
 
 
-def test_lambda_handler(apigw_event, mocker):
+@pytest.fixture()
+def test_event():
+    return apigw_event('/test/path')
 
-    ret = app.lambda_handler(apigw_event, "")
-    data = json.loads(ret["body"])
 
-    assert ret["statusCode"] == 200
-    assert "message" in ret["body"]
-    assert data["message"] == "hello world"
-    # assert "location" in data.dict_keys()
+def test_lambda_handler(test_event, mocker):
+    # mock the App class
+    mips_api.mips_app = mocker.MagicMock(spec=mips_api.mips.App)
+
+    # invalid event / no path
+    ret = mips_api.lambda_handler({}, "")
+    assert ret['statusCode'] == 400
+
+    json_data = json.loads(ret["body"])
+    assert json_data == {'error': 'Invalid event: No path found'}
+
+    # success
+    success = 'test success'
+    mips_api.mips_app.get_mips_data.return_value = success
+    ret = mips_api.lambda_handler(test_event, "")
+    assert ret['statusCode'] == 200
+
+    json_data = json.loads(ret["body"])
+    assert json_data == success
+
+    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])
+
+    # mips api failure
+    mips_exc = 'test failure'
+    mips_api.mips_app.get_mips_data.side_effect = Exception(mips_exc)
+    ret = mips_api.lambda_handler(test_event, "")
+    assert ret['statusCode'] == 500
+
+    json_data = json.loads(ret["body"])
+    assert json_data == {'error': mips_exc}
+
+    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])
+
+    # init failure
+    init_exc = 'App initialization failure'
+    mips_api.mips_app.collect_secrets.side_effect = Exception(init_exc)
+    ret = mips_api.lambda_handler({}, "")
+    assert ret['statusCode'] == 500
+
+    json_data = json.loads(ret["body"])
+    assert json_data == {'error': init_exc}
