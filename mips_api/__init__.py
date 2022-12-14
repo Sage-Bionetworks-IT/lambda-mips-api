@@ -1,6 +1,7 @@
 from mips_api import mips
 
 import json
+import os
 
 
 # this is global so that it can be mocked in test
@@ -29,13 +30,25 @@ def lambda_handler(event, context):
         Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
     """
 
-    # helper function to encapsulate the body and status code
+    # get cache-control max-age from environment variable
+    cache_age = None
+    try:
+        cache_age = os.environ['CacheTTL']
+    except KeyError as exc:
+        return {
+            "statusCode": 500,
+            "body": "Missing environment variable: CacheTTL",
+        }
+
+    # helper function to structure return data and set cache control
     def _build_return(code, body):
         return {
             "statusCode": code,
             "body": json.dumps(body),
+            "headers": {"cache-control": f"max-age={cache_age}"},
         }
 
+    # get secure parameters
     global mips_app
     try:
         if mips_app is None:
@@ -44,6 +57,7 @@ def lambda_handler(event, context):
     except Exception as exc:
         return _build_return(500, {"error": str(exc)})
 
+    # parse the path and get the data
     if 'path' in event:
         event_path = event['path']
 
@@ -54,4 +68,4 @@ def lambda_handler(event, context):
 
         return _build_return(200, mips_data)
 
-    return _build_return(400, {"error": "Invalid event: No path found"})
+    return _build_return(400, {"error": f"Invalid event: No path found: {event}"})

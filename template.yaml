@@ -23,6 +23,10 @@ Parameters:
     Type: String
     Default: lambda-mips-api
     Description: Prefix used in the KMS Key Alias name
+  CacheTTL:
+    Type: Number
+    Default: 86400
+    Description: Maximum number of seconds until cached responses expire; default 86400 (1 day)
 
 Resources:
   Function:
@@ -35,6 +39,7 @@ Resources:
         Variables:
           MipsOrg: !Ref MipsOrganization
           SsmPath: !Ref SsmParamPrefix
+          CacheTTL: !Ref CacheTTL
           apiAllCostCenters: '/all/costcenters.json'
       Role: !GetAtt FunctionRole.Arn
       Events:
@@ -67,6 +72,41 @@ Resources:
                 Action:
                   - 'ssm:GetParameter*'
                 Effect: Allow
+
+  CloudFrontCache:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultCacheBehavior:
+          CachePolicyId: !Ref CloudFrontCachePolicy
+          TargetOriginId: LambdaOrigin
+          ViewerProtocolPolicy: 'redirect-to-https'
+        Origins:
+          - Id: LambdaOrigin
+            DomainName: !Sub "${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com"
+            OriginPath: /Prod
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+
+  CloudFrontCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: LambdaCache
+        MinTTL: 0
+        MaxTTL: !Ref CacheTTL
+        DefaultTTL: !Ref CacheTTL
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          # Don't pass any client cookies, headers, or query strings
+          # to the lambda because we don't need them
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
 
   # Key for encrypting our secret parameter
   # The secret parameter will need to be created manually in SSM
@@ -120,9 +160,12 @@ Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  ApiRouteAllCostCenters:
-    Description: "API Gateway endpoint URL for Prod stage for function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/all/costcenters.json"
+  CloudfrontAllCostCenters:
+    Description: "CloudFront URL for function"
+    Value: !Sub "https://${CloudFrontCache.DomainName}/all/costcenters.json"
+  OriginUrl:
+    Description: "API Gateway origin URL with stage"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
   FunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt Function.Arn

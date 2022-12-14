@@ -3,35 +3,60 @@ An AWS Lambda microservice presenting MIPS chart of accounts data
 
 ## Architecture
 
+This microservice is designed to retrieve a chart of accounts from a third-party API and present the data in a useful format.
+The initial implementation formats all accounts into a JSON string,
+future iterations will add formats to replace existing static files and filter out inactive accounts.
+
+Since we reach out to a third-party API across the internet, responses are cached to minimize interaction with the API
+and mitigate potential environmental issues (e.g. packet loss).
+
 ![Component Diagram](docs/lambda-mips-api_components.drawio.png)
 
-## Required Secure Parameters
+In the event of a cache miss in Cloudfront, an API gateway request will trigger the lambda,
+which will read login credentials from secure parameters in SSM, query MIPS for the latest chart of accounts,
+and return a JSON mapping of the data to be stored in Cloudfront for a default of one day.
+
+In the event of a cache hit, Cloudfront will return the cached value without triggering an API gateway event.
+
+### Required Secure Parameters
 
 User credentials for logging in to the finance system are stored as secure parameters with a configurable prefix.
 By default, the prefix is `/lambda/mipsSecret`, resulting the following required secure parameters:
 * `/lambda/mipsSecret/user`
 * `/lambda/mipsSecret/pass`
 
-## Template Parameters
+### Template Parameters
 
 The following template parameters are set as environment variables in the lambda environment:
 | Template Parameter | Environment Variable | Description |
 | --- | --- | --- |
+| CacheTTL | CacheTTL | Value for `max-age` in the `cache-control` header |
 | SsmParamPrefix | SsmPath | Path prefix for secure parameters |
 | MipsOrganization | MipsOrg | Log in to this organization in the finance system |
 
-## Triggering
+### Triggering
 
 The CloudFormation template will output the endpoint URL that can be loaded in a browser, e.g.:
-`https://57lejqxw32.execute-api.us-east-1.amazonaws.com/Prod/all/costcenters.json`
+`https://abcxyz.cloudfront.net/all/costcenters.json`
 
-## Respones Format
+### Respones Format
 
 The API will return a json string representing a dictionary mapping program codes to their names.
 E.g.:
 ```json
 {"000000": "No Program", "990300": "Program Infrastructure"}
 ```
+
+### CloudFront Cache
+
+This microservice is expected to be used less frequently than the 15-minute expiry for the lambda environments,
+which means most lambda runs will require a cold start.
+We also expect the third-party API data to change much less frequently than the microservice is called.
+And so we add a CloudFront cache to store the lambda responses,
+reducing our reliance on the third-party API and minimizing the impact of the lambda cold starts by calling the lambda less frequently.
+
+If a bad response has been cached, it may need to be [manually invalidated through Cloudfront](https://aws.amazon.com/premiumsupport/knowledge-center/cloudfront-clear-cache/).
+
 
 ## Development
 
