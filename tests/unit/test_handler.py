@@ -1,6 +1,7 @@
 import mips_api
 
 import json
+import os
 
 import pytest
 
@@ -70,12 +71,20 @@ def test_lambda_handler(test_event, mocker):
     # mock the App class
     mips_api.mips_app = mocker.MagicMock(spec=mips_api.mips.App)
 
+    # no cache ttl
+    ret = mips_api.lambda_handler({}, "")
+    assert ret['statusCode'] == 500
+    assert ret['body'] == 'Missing environment variable: CacheTTL'
+
+    # inject cache ttl env var
+    os.environ['CacheTTL'] = '10'
+
     # invalid event / no path
     ret = mips_api.lambda_handler({}, "")
     assert ret['statusCode'] == 400
 
     json_data = json.loads(ret["body"])
-    assert json_data == {'error': 'Invalid event: No path found'}
+    assert json_data == {'error': 'Invalid event: No path found: {}'}
 
     # success
     success = 'test success'
