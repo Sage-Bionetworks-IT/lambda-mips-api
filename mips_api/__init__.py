@@ -121,7 +121,7 @@ def collect_chart(org_name, secrets):
     return mips_dict
 
 
-def list_tags(chart_dict, omit_list, extra_dict):
+def list_tags(params, chart_dict, omit_list, extra_dict):
     '''
     Generate a list of valid AWS tags. Only active codes are listed.
 
@@ -133,6 +133,7 @@ def list_tags(chart_dict, omit_list, extra_dict):
 
     tags = []
 
+    # inject extra cost centers
     for code, name in extra_dict.items():
         tags.append(f"{name} / {code}")
 
@@ -146,7 +147,20 @@ def list_tags(chart_dict, omit_list, extra_dict):
                 if tag not in tags:
                     tags.append(tag)
 
-    return tags
+    limit = 0
+    if params:
+        if 'limit' in params:
+            try:
+                limit = int(params['limit'])
+            except TypeError as exc:
+                err_str = "QueryStringParameter 'limit' must be an Integer"
+                raise TypeError(err_str)
+
+    if limit > 0:
+        print(f"limiting output to {limit} values")
+        return tags[0:limit]
+    else:
+        return tags
 
 
 def lambda_handler(event, context):
@@ -199,6 +213,11 @@ def lambda_handler(event, context):
         # get chart of accounts from mips
         mips_chart = collect_chart(mips_org)
 
+        # collect query-string parameters
+        params = {}
+        if 'queryStringParameters' in event:
+            params = event['queryStringParameters']
+
         # parse the path and return appropriate data
         if 'path' in event:
             event_path = event['path']
@@ -209,7 +228,7 @@ def lambda_handler(event, context):
 
             elif event_path == api_routes['ApiValidTags']:
                 try:
-                    valid_tags = list_tags(omit_codes_list, extra_codes_dict)
+                    valid_tags = list_tags(params, mips_chart, omit_codes_list, extra_codes_dict)
                 except Exception as exc:
                     return _build_return(500, {"error": str(exc)})
 

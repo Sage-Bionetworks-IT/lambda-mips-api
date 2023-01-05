@@ -122,7 +122,7 @@ Resources:
           HeadersConfig:
             HeaderBehavior: none
           QueryStringsConfig:
-            QueryStringBehavior: none
+            QueryStringBehavior: all
 
   # Key for encrypting our secret parameter
   # The secret parameter will need to be created manually in SSM
