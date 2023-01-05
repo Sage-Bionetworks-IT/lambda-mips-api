@@ -11,9 +11,8 @@ from botocore.stub import Stubber
 def test_mips(mocker, requests_mock):
 
     # valid request paths
-    cost_centers_path = '/test/costcenters.json'
-    program_codes_path = '/test/ProgramCodes.json'
-    program_codes_all_path = '/test/ProgramCodesAll.json'
+    accounts_path = '/test/accounts.json'
+    tags_path = '/test/tags.json'
 
     # mock secure parameters
     ssm_path = 'test/path'
@@ -46,10 +45,6 @@ def test_mips(mocker, requests_mock):
                 'accountTitle': 'Inactive',
             },
             {
-                'accountCodeId': '56789',
-                'accountTitle': 'Legacy',
-            },
-            {
                 'accountCodeId': '99030000',
                 'accountTitle': 'Platform Infrastructure',
             },
@@ -65,27 +60,14 @@ def test_mips(mocker, requests_mock):
         '12345600': 'Other Program A',
         '12345601': 'Other Program B',
         '12345': 'Inactive',
-        '56789': 'Legacy',
         '99030000': 'Platform Infrastructure',
         '99990000': 'Unfunded',
     }
 
-    # overwrite hard-coded values
-    mips_api.mips.App._legacy_program_codes = [ '56789', ]
-    mips_api.mips.App._main_program_codes = [ '990300', ]
-
     expected_program_codes = [
-        'Platform Infrastructure / 990300',
-        'No Program / 000000',
-        'Other / 000001',
-    ]
-
-    expected_program_codes_all = [
         'No Program / 000000',
         'Other / 000001',
         'Other Program A / 123456',
-        'Other Program B / 123456',
-        'Legacy / 56789',
         'Platform Infrastructure / 990300',
     ]
 
@@ -107,9 +89,8 @@ def test_mips(mocker, requests_mock):
         # inject needed env vars
         os.environ['MipsOrg'] = 'testOrg'
         os.environ['SsmPath'] = ssm_path
-        os.environ['apiAllCostCenters'] = cost_centers_path
-        os.environ['apiProgramCodes'] = program_codes_path
-        os.environ['apiProgramCodesAll'] = program_codes_all_path
+        os.environ['apiAllAccounts'] = accounts_path
+        os.environ['apiTagValues'] = tags_path
 
         # create object under test
         mips_app = mips_api.mips.App()
@@ -120,7 +101,7 @@ def test_mips(mocker, requests_mock):
         stub_ssm.assert_no_pending_responses()
 
         # get chart of accouts from mips
-        mips_app.get_mips_data(cost_centers_path)
+        mips_app.get_mips_data(accounts_path, None)
         assert mips_app.mips_dict == expected_mips_dict
         assert login_mock.call_count == 1
         assert chart_mock.call_count == 1
@@ -132,15 +113,17 @@ def test_mips(mocker, requests_mock):
             mips_app._collect_mips_data()
         assert logout_mock.call_count == 2
 
-        # service catalog transform (main)
+        # valid tag list
         main_json = mips_app._service_catalog_json()
         main_list = json.loads(main_json)
         assert main_list == expected_program_codes
 
-        # service catalog transform (all)
-        all_json = mips_app._service_catalog_all_json()
-        all_list = json.loads(all_json)
-        assert all_list == expected_program_codes_all
+        # valid tag list (with limit)
+        mips_app._collect_params({'limit': 3})
+        assert mips_app.params['limit'] == 3
+        limit_json = mips_app._service_catalog_json()
+        limit_list = json.loads(limit_json)
+        assert limit_list == expected_program_codes[0:3]
 
         # get invalid path
         with pytest.raises(Exception):

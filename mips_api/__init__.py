@@ -63,13 +63,17 @@ def lambda_handler(event, context):
     except Exception as exc:
         return _return_dict(500, {"error": str(exc)})
 
+    params = {}
+    if 'queryStringParameters' in event:
+        params = event['queryStringParameters']
+
     # parse the path and get the data
     if 'path' in event:
         event_path = event['path']
         valid_routes = mips_app.valid_routes()
         if event_path in valid_routes:
             try:
-                mips_data = mips_app.get_mips_data(event_path)
+                mips_data = mips_app.get_mips_data(event_path, params)
             except Exception as exc:
                 return _return_dict(500, {"error": str(exc)})
             return _return_json(200, mips_data)

@@ -98,7 +98,7 @@ def test_lambda_handler(test_event, mocker):
     json_data = ret["body"]
     assert json_data == success
 
-    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])
+    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'], test_event['queryStringParameters'])
 
     # mips api failure
     mips_exc = 'test failure'
@@ -109,7 +109,7 @@ def test_lambda_handler(test_event, mocker):
     json_data = json.loads(ret["body"])
     assert json_data == {'error': mips_exc}
 
-    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])
+    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'], test_event['queryStringParameters'])
 
     # init failure
     init_exc = 'App initialization failure'

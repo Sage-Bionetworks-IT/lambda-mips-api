@@ -10,28 +10,6 @@ class App:
     _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'
     _mips_url_logout = 'https://mipapi.abilaonline.com/api/security/logout'
 
-    # distinguish `CostCenter` from `CostCenterOther`
-    _main_program_codes = [
-        '101300',  # CSBC - NCI
-        '101400',  # AoU - Scripps
-        '101600',  # NIH-ITCR
-        '112501',  # Mobile Toolbox Project Core
-        '119400',  # Depression-Emory Wingo
-        '120100',  # HTAN-DFCI
-        '121700',  # HTAN Supp DFCI
-        '122000',  # INCLUDE - CHOP
-        '122100',  # NF - DoD w/UCF
-        '122300',  # Emory Diversity Cohorts
-        '312000',  # Genie-AACR
-        '314900',  # iAtlas 3
-        '401900',  # Digital Accelerators-ADDF
-        '506800',  # NLP CH - Celgene
-        '613500',  # Psorcast Pscrosis App
-        '990100',  # General + Administrative
-        '990300',  # Platform Infrastructure
-        '990400',  # Governance
-    ]
-
     # add these meta codes as valid `CostCenter` values
     _extra_program_codes = {
         '000000':  'No Program',
@@ -44,11 +22,6 @@ class App:
         '999800',  # salary cap
         '999700',  # long term leave
         '990500',  # program management
-    ]
-
-    # inactive codes that we still need
-    _legacy_program_codes = [
-        '30144',
     ]
 
     ssm_client = None
@@ -67,19 +40,20 @@ class App:
 
         self._ssm_secrets = None
         self._mips_org = None
+
         self.mips_dict = {}
-        self.valid_routes = {}
+        self.params = {}
+        self.api_routes = {}
 
         self._mips_org = self._get_os_var('MipsOrg')
         self.ssm_path = self._get_os_var('SsmPath')
 
         api_routes = [
-            'apiAllCostCenters',
-            'apiProgramCodes',
-            'apiProgramCodesAll',
+            'apiAllAccounts',
+            'apiTagValues',
         ]
         for route_name in api_routes:
-            self.valid_routes[route_name] = self._get_os_var(route_name)
+            self.api_routes[route_name] = self._get_os_var(route_name)
 
     def collect_secrets(self):
         '''Collect secure parameters'''
@@ -156,6 +130,16 @@ class App:
                 headers={"Authorization-Token":access_token},
             )
 
+    def _collect_params(self, event_params):
+        '''Process query string parameters'''
+
+        if 'limit' in event_params:
+            try:
+                self.params['limit'] = int(event_params['limit'])
+            except TypeError as exc:
+                print('limit parameter must be an integer')
+                raise exc
+
     def _mips_dict_json(self):
         '''
         Transform the full chart of accounts into JSON
@@ -163,31 +147,6 @@ class App:
         return json.dumps(self.mips_dict, indent=2)
 
     def _service_catalog_json(self):
-        '''
-        Transform data into a format for service catalog tag options
-
-        Include only values for the `CostCenter` tag, excluding values for the `CostCenterOther` tag.
-
-        Returns
-            A JSON string representing an array of strings in the format `{Program Name} / {Program Code}`
-        '''
-
-        data = []
-
-        for code, name in self.mips_dict.items():
-            short = code[:6]  # ignore the last two digits on active codes
-
-            if short in App._main_program_codes:
-                title = f"{name} / {short}"
-                if title not in data:
-                    data.append(title)
-
-        for code, name in App._extra_program_codes.items():
-            data.append(f"{name} / {code}")
-
-        return json.dumps(data, indent=2)
-
-    def _service_catalog_all_json(self):
         '''
         Transform data into a format for service catalog tag validation
 
@@ -198,47 +157,55 @@ class App:
         '''
 
         data = []
+        found = []
 
         for code, name in App._extra_program_codes.items():
             data.append(f"{name} / {code}")
 
         for code, name in self.mips_dict.items():
-            if code in App._legacy_program_codes or len(code) > 5:
+            if len(code) > 5: # inactive codes have 5 digits
                 short = code[:6]  # ignore the last two digits on active codes
                 if short not in App._omit_program_codes:
-                    title = f"{name} / {short}"
-                    if title not in data:
+                    if short not in found:
+                        title = f"{name} / {short}"
                         data.append(title)
+                        found.append(short)
 
-        return json.dumps(data, indent=2)
+        result = data
+        if 'limit' in self.params:
+            limit = self.params['limit']
+            result = data[0:limit]
+
+        return json.dumps(result, indent=2)
 
     def valid_routes(self):
         '''
         List all valid routes
         '''
-        return self.valid_routes.values()
+        return self.api_routes.values()
 
     def _get_mips_data(self, lookup):
         '''
         Process MIPS data into requested format
         '''
 
-        if lookup == self.valid_routes['apiAllCostCenters']:
+        if lookup == self.api_routes['apiAllAccounts']:
             return self._mips_dict_json()
 
-        if lookup == self.valid_routes['apiProgramCodes']:
+        if lookup == self.api_routes['apiTagValues']:
             return self._service_catalog_json()
 
-        if lookup == self.valid_routes['apiProgramCodesAll']:
-            return self._service_catalog_all_json()
-
-    def get_mips_data(self, lookup):
+    def get_mips_data(self, lookup, params):
         '''
         Entry point for retrieving data
 
         Returns
             The body of the requested object
         '''
+
+        # Collect query string parameters
+        if params:
+            self._collect_params(params)
 
         # Query MIPS if needed
         if not self.mips_dict:
