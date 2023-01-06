@@ -4,8 +4,12 @@ An AWS Lambda microservice presenting MIPS chart of accounts data
 ## Architecture
 
 This microservice is designed to retrieve a chart of accounts from a third-party API and present the data in a useful format.
-The initial implementation formats all accounts into a JSON string,
-future iterations will add formats to replace existing static files and filter out inactive accounts.
+
+Formats available:
+| Route | Description |
+| --- | --- |
+| /accounts.json | A dictionary mapping all active and inactive accounts to their friendly names. |
+| /tags.json | A list of valid values for either `CostCenter` or `CostCenterOther` tags. |
 
 Since we reach out to a third-party API across the internet, responses are cached to minimize interaction with the API
 and mitigate potential environmental issues (e.g. packet loss).
@@ -17,6 +21,12 @@ which will read login credentials from secure parameters in SSM, query MIPS for 
 and return a JSON mapping of the data to be stored in Cloudfront for a default of one day.
 
 In the event of a cache hit, Cloudfront will return the cached value without triggering an API gateway event.
+
+### Query String Parameters
+
+| Query String Parameter | Valid Routes | Description |
+| --- | --- | --- |
+| limit | /tags.json | Return no more than `limit` valid tags. Must be an integer. |
 
 ### Required Secure Parameters
 

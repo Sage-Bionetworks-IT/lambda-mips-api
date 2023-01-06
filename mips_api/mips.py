@@ -1,3 +1,4 @@
+import json
 import os
 
 import boto3
@@ -9,9 +10,29 @@ class App:
     _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'
     _mips_url_logout = 'https://mipapi.abilaonline.com/api/security/logout'
 
+    # add these meta codes as valid `CostCenter` values
+    _extra_program_codes = {
+        '000000':  'No Program',
+        '000001':  'Other',
+    }
+
+    # ignore these active codes
+    _omit_program_codes = [
+        '999900',  # unfunded
+        '999800',  # salary cap
+        '999700',  # long term leave
+        '990500',  # program management
+    ]
+
     ssm_client = None
 
     required_secrets = [ 'user', 'pass' ]
+
+    def _get_os_var(self, varnam):
+        try:
+            return os.environ[varnam]
+        except KeyError as exc:
+            raise Exception(f"The environment variable '{varnam}' must be set")
 
     def __init__(self):
         if App.ssm_client is None:
@@ -19,23 +40,20 @@ class App:
 
         self._ssm_secrets = None
         self._mips_org = None
+
         self.mips_dict = {}
-        self.valid_routes = []
+        self.params = {}
+        self.api_routes = {}
 
-        try:
-            self.valid_routes.append(os.environ['apiAllCostCenters'])
-        except KeyError:
-            raise Exception("The environment variable 'apiAllCostCenters' must be set.")
+        self._mips_org = self._get_os_var('MipsOrg')
+        self.ssm_path = self._get_os_var('SsmPath')
 
-        try:
-            self._mips_org = os.environ['MipsOrg']
-        except KeyError:
-            raise Exception("The environment variable 'MipsOrg' must be set.")
-
-        try:
-            self.ssm_path = os.environ['SsmPath']
-        except KeyError:
-            raise Exception("The environment variable 'SsmPath' must be set.")
+        api_routes = [
+            'apiAllAccounts',
+            'apiTagValues',
+        ]
+        for route_name in api_routes:
+            self.api_routes[route_name] = self._get_os_var(route_name)
 
     def collect_secrets(self):
         '''Collect secure parameters'''
@@ -67,6 +85,7 @@ class App:
     def _collect_mips_data(self):
         '''Log into MIPS, get the chart of accounts, and log out'''
 
+        access_token = None
         try:
             # get mips access token
             mips_creds = {
@@ -111,12 +130,89 @@ class App:
                 headers={"Authorization-Token":access_token},
             )
 
-    def get_mips_data(self, lookup):
-        '''TODO: implement cache lookup'''
-        if lookup not in self.valid_routes:
-            raise Exception(f"Invalid request: {lookup}")
+    def _collect_params(self, event_params):
+        '''Process query string parameters'''
 
+        if 'limit' in event_params:
+            try:
+                self.params['limit'] = int(event_params['limit'])
+            except TypeError as exc:
+                print('limit parameter must be an integer')
+                raise exc
+
+    def _mips_dict_json(self):
+        '''
+        Transform the full chart of accounts into JSON
+        '''
+        return json.dumps(self.mips_dict, indent=2)
+
+    def _service_catalog_json(self):
+        '''
+        Transform data into a format for service catalog tag validation
+
+        Include values for both the `CostCenter` and `CostCenterOther` tags.
+
+        Returns
+            A JSON string representing an array of strings in the format `{Program Name} / {Program Code}`
+        '''
+
+        data = []
+        found = []
+
+        for code, name in App._extra_program_codes.items():
+            data.append(f"{name} / {code}")
+
+        for code, name in self.mips_dict.items():
+            if len(code) > 5: # inactive codes have 5 digits
+                short = code[:6]  # ignore the last two digits on active codes
+                if short not in App._omit_program_codes:
+                    if short not in found:
+                        title = f"{name} / {short}"
+                        data.append(title)
+                        found.append(short)
+
+        result = data
+        if 'limit' in self.params:
+            limit = self.params['limit']
+            result = data[0:limit]
+
+        return json.dumps(result, indent=2)
+
+    def valid_routes(self):
+        '''
+        List all valid routes
+        '''
+        return self.api_routes.values()
+
+    def _get_mips_data(self, lookup):
+        '''
+        Process MIPS data into requested format
+        '''
+
+        if lookup == self.api_routes['apiAllAccounts']:
+            return self._mips_dict_json()
+
+        if lookup == self.api_routes['apiTagValues']:
+            return self._service_catalog_json()
+
+    def get_mips_data(self, lookup, params):
+        '''
+        Entry point for retrieving data
+
+        Returns
+            The body of the requested object
+        '''
+
+        # Collect query string parameters
+        if params:
+            self._collect_params(params)
+
+        # Query MIPS if needed
         if not self.mips_dict:
             self._collect_mips_data()
 
-        return self.mips_dict
+        # Collect requested data
+        data = self._get_mips_data(lookup)
+
+        # Return the object body
+        return data
