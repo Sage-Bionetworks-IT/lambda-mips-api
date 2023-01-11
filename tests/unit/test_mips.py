@@ -11,9 +11,8 @@ from botocore.stub import Stubber
 def test_mips(mocker, requests_mock):
 
     # valid request paths
-    cost_centers_path = '/test/costcenters.json'
-    program_codes_path = '/test/ProgramCodes.json'
-    program_codes_all_path = '/test/ProgramCodesAll.json'
+    chart_of_accounts_path = '/test/accounts.json'
+    valid_tags_path = '/test/tags.json'
 
     # mock secure parameters
     ssm_path = 'test/path'
@@ -46,10 +45,6 @@ def test_mips(mocker, requests_mock):
                 'accountTitle': 'Inactive',
             },
             {
-                'accountCodeId': '56789',
-                'accountTitle': 'Legacy',
-            },
-            {
                 'accountCodeId': '99030000',
                 'accountTitle': 'Platform Infrastructure',
             },
@@ -60,32 +55,23 @@ def test_mips(mocker, requests_mock):
         ]
     }
 
-    # expected result
+    omit_codes = '999900,999800'
+    add_codes = '000000:No Program,000001:Other'
+
+    # expected results
     expected_mips_dict = {
         '12345600': 'Other Program A',
         '12345601': 'Other Program B',
         '12345': 'Inactive',
-        '56789': 'Legacy',
         '99030000': 'Platform Infrastructure',
         '99990000': 'Unfunded',
     }
 
-    # overwrite hard-coded values
-    mips_api.mips.App._legacy_program_codes = [ '56789', ]
-    mips_api.mips.App._main_program_codes = [ '990300', ]
-
-    expected_program_codes = [
-        'Platform Infrastructure / 990300',
-        'No Program / 000000',
-        'Other / 000001',
-    ]
-
-    expected_program_codes_all = [
+    expected_valid_tags = [
         'No Program / 000000',
         'Other / 000001',
         'Other Program A / 123456',
         'Other Program B / 123456',
-        'Legacy / 56789',
         'Platform Infrastructure / 990300',
     ]
 
@@ -107,9 +93,10 @@ def test_mips(mocker, requests_mock):
         # inject needed env vars
         os.environ['MipsOrg'] = 'testOrg'
         os.environ['SsmPath'] = ssm_path
-        os.environ['apiAllCostCenters'] = cost_centers_path
-        os.environ['apiProgramCodes'] = program_codes_path
-        os.environ['apiProgramCodesAll'] = program_codes_all_path
+        os.environ['CodesToOmit'] = omit_codes
+        os.environ['CodesToAdd'] = add_codes
+        os.environ['apiChartOfAccounts'] = chart_of_accounts_path
+        os.environ['apiValidTags'] = valid_tags_path
 
         # create object under test
         mips_app = mips_api.mips.App()
@@ -120,7 +107,7 @@ def test_mips(mocker, requests_mock):
         stub_ssm.assert_no_pending_responses()
 
         # get chart of accouts from mips
-        mips_app.get_mips_data(cost_centers_path)
+        mips_app.get_mips_data(chart_of_accounts_path)
         assert mips_app.mips_dict == expected_mips_dict
         assert login_mock.call_count == 1
         assert chart_mock.call_count == 1
@@ -132,15 +119,10 @@ def test_mips(mocker, requests_mock):
             mips_app._collect_mips_data()
         assert logout_mock.call_count == 2
 
-        # service catalog transform (main)
-        main_json = mips_app._service_catalog_json()
-        main_list = json.loads(main_json)
-        assert main_list == expected_program_codes
-
-        # service catalog transform (all)
-        all_json = mips_app._service_catalog_all_json()
-        all_list = json.loads(all_json)
-        assert all_list == expected_program_codes_all
+        # get valid tag list
+        tags_json = mips_app.get_mips_data(valid_tags_path)
+        tags_list = json.loads(tags_json)
+        assert tags_list == expected_valid_tags
 
         # get invalid path
         with pytest.raises(Exception):
