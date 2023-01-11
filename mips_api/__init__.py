@@ -132,6 +132,7 @@ def list_tags(params, chart_dict, omit_list, extra_dict):
     '''
 
     tags = []
+    found_codes = []
 
     # inject extra cost centers
     for code, name in extra_dict.items():
@@ -143,9 +144,10 @@ def list_tags(params, chart_dict, omit_list, extra_dict):
         if len(code) > 5: # only include active codes
             short = code[:6]  # ignore the last two digits on active codes
             if short not in omit_list:
-                tag = f"{name} / {short}"
-                if tag not in tags:
+                if short not in found_codes:
+                    tag = f"{name} / {short}"
                     tags.append(tag)
+                    found_codes.append(short)
 
     limit = 0
     if params:

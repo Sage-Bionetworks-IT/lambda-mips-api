@@ -73,7 +73,7 @@ mock_chart = {
             'accountTitle': 'Other Program B',
         },
         {
-            'accountCodeId': '12345',
+            'accountCodeId': '54321',
             'accountTitle': 'Inactive',
         },
         {
@@ -91,7 +91,7 @@ mock_chart = {
 expected_mips_dict = {
     '12345600': 'Other Program A',
     '12345601': 'Other Program B',
-    '12345': 'Inactive',
+    '54321': 'Inactive',
     '99030000': 'Platform Infrastructure',
     '99990000': 'Unfunded',
 }
@@ -101,7 +101,6 @@ expected_tag_list = [
     'No Program / 000000',
     'Other / 000001',
     'Other Program A / 123456',
-    'Other Program B / 123456',
     'Platform Infrastructure / 990300',
 ]
 
