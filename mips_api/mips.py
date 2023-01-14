@@ -23,8 +23,7 @@ class App:
         if App.ssm_client is None:
             App.ssm_client = boto3.client('ssm')
 
-        self._ssm_secrets = None
-        self._mips_org = None
+        self._ssm_secrets = {}
         self.mips_dict = {}
         self.api_routes = {}
 
@@ -49,9 +48,7 @@ class App:
 
     def collect_secrets(self):
         '''Collect secure parameters'''
-        if self._ssm_secrets is None:
-            self._ssm_secrets = {}
-
+        if not self._ssm_secrets:
             params = App.ssm_client.get_parameters_by_path(
                 Path=self.ssm_path,
                 Recursive=True,
@@ -124,18 +121,18 @@ class App:
 
     def _mips_dict_json(self):
         '''
-        Transform the full chart of accounts into JSON
+        Return the full chart of accounts as JSON
         '''
         return json.dumps(self.mips_dict, indent=2)
 
     def _tag_list_json(self):
         '''
-        Transform data into a format for service catalog tag validation
+        Generate a list of valid AWS tags. Only active codes are listed.
 
-        Include values for both the `CostCenter` and `CostCenterOther` tags.
+        The string format is `{Program Name} / {Program Code}`.
 
         Returns
-            A JSON string representing an array of strings in the format `{Program Name} / {Program Code}`
+            A JSON string representing an array of strings.
         '''
 
         data = []
@@ -143,8 +140,10 @@ class App:
         for code, name in self._extra_program_codes.items():
             data.append(f"{name} / {code}")
 
+        # inactive codes have 5 digits, active codes have 8;
+        # and only the first 6 digits of active codes are significant
         for code, name in self.mips_dict.items():
-            if len(code) > 5:
+            if len(code) > 5: # only include active codes
                 short = code[:6]  # ignore the last two digits on active codes
                 if short not in self._omit_program_codes:
                     title = f"{name} / {short}"
@@ -170,6 +169,8 @@ class App:
         if lookup == self.api_routes['apiValidTags']:
             return self._tag_list_json()
 
+        raise Exception('Invalid API route')
+
     def get_mips_data(self, lookup):
         '''
         Entry point for retrieving data
@@ -177,6 +178,10 @@ class App:
         Returns
             The body of the requested object
         '''
+
+        # Verify a valid lookup path
+        if lookup not in self.valid_routes():
+            raise Exception(f'Invalid API route: {lookup}')
 
         # Query MIPS if needed
         if not self.mips_dict:

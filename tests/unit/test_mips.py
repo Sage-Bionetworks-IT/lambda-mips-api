@@ -8,133 +8,229 @@ import pytest
 from botocore.stub import Stubber
 
 
-def test_mips(mocker, requests_mock):
+# fixtures that don't need a setup function
 
-    # valid request paths
-    chart_of_accounts_path = '/test/accounts.json'
-    valid_tags_path = '/test/tags.json'
+# environment variables
+api_accounts = '/test/accounts.json'
+api_tags = '/test/tags.json'
+org_name = 'testOrg'
+ssm_path = 'secret/path'
+omit_codes = '999900,999800'
+add_codes = '000000:No Program,000001:Other'
 
-    # mock secure parameters
-    ssm_path = 'test/path'
-    ssm_secrets = {
-        'user': 'test',
-        'pass': 'test',
-    }
-    ssm_param_results = {
-        'Parameters': [ {'Name': k, 'Value': v} for k, v in ssm_secrets.items() ]
-    }
+# neither api_accounts nor api_tags
+api_invalid = '/test/invalid'
 
-    # mock access token
-    mips_login_data = {
-        'AccessToken': 'testToken',
-    }
+# mock secrets used in all tests
+mock_secrets = {
+    'user': 'test',
+    'pass': 'test',
+}
 
-    # mock chart of accounts
-    mips_chart_data = {
-        'data': [
-            {
-                'accountCodeId': '12345600',
-                'accountTitle': 'Other Program A',
-            },
-            {
-                'accountCodeId': '12345601',
-                'accountTitle': 'Other Program B',
-            },
-            {
-                'accountCodeId': '12345',
-                'accountTitle': 'Inactive',
-            },
-            {
-                'accountCodeId': '99030000',
-                'accountTitle': 'Platform Infrastructure',
-            },
-            {
-                'accountCodeId': '99990000',
-                'accountTitle': 'Unfunded',
-            },
-        ]
-    }
-
-    omit_codes = '999900,999800'
-    add_codes = '000000:No Program,000001:Other'
-
-    # expected results
-    expected_mips_dict = {
-        '12345600': 'Other Program A',
-        '12345601': 'Other Program B',
-        '12345': 'Inactive',
-        '99030000': 'Platform Infrastructure',
-        '99990000': 'Unfunded',
-    }
-
-    expected_valid_tags = [
-        'No Program / 000000',
-        'Other / 000001',
-        'Other Program A / 123456',
-        'Other Program B / 123456',
-        'Platform Infrastructure / 990300',
+# mock return from get_parameters_by_path
+mock_ssm_params = {
+    'Parameters': [
+        {'Name': k, 'Value': v} for k, v in mock_secrets.items()
     ]
+}
 
-    # create requests mocks for mips
-    login_mock = requests_mock.post(mips_api.mips.App._mips_url_login, json=mips_login_data)
-    chart_mock = requests_mock.get(mips_api.mips.App._mips_url_chart, json=mips_chart_data)
-    logout_mock = requests_mock.post(mips_api.mips.App._mips_url_logout)
+# mock access token
+mock_token = {
+    'AccessToken': 'testToken',
+}
+
+# mock chart of accounts
+mock_chart = {
+    'data': [
+        {
+            'accountCodeId': '12345600',
+            'accountTitle': 'Other Program A',
+        },
+        {
+            'accountCodeId': '12345601',
+            'accountTitle': 'Other Program B',
+        },
+        {
+            'accountCodeId': '12345',
+            'accountTitle': 'Inactive',
+        },
+        {
+            'accountCodeId': '99030000',
+            'accountTitle': 'Platform Infrastructure',
+        },
+        {
+            'accountCodeId': '99990000',
+            'accountTitle': 'Unfunded',
+        },
+    ]
+}
+
+# expected internal dictionary
+expected_mips_dict = {
+    '12345600': 'Other Program A',
+    '12345601': 'Other Program B',
+    '12345': 'Inactive',
+    '99030000': 'Platform Infrastructure',
+    '99990000': 'Unfunded',
+}
+
+# expected tag list
+expected_valid_tags = [
+    'No Program / 000000',
+    'Other / 000001',
+    'Other Program A / 123456',
+    'Other Program B / 123456',
+    'Platform Infrastructure / 990300',
+]
+
+@pytest.fixture
+def ssm_stub():
+    '''
+    Create an object containing SSM fixtures,
+    including a single Stubber used by all tests.
+    '''
 
     # stub ssm client
     ssm = boto3.client('ssm')
     mips_api.mips.App.ssm_client = ssm
-    with Stubber(ssm) as stub_ssm:
-        stub_ssm.add_response('get_parameters_by_path', ssm_param_results)
+    with Stubber(ssm) as _stub:
+        # yield instead of return in order to treat
+        # the rest of this function as teardown
+        yield _stub
 
-        # init failure: missing env vars
-        with pytest.raises(Exception):
-            mips_app = mips_api.mips.App()
+    # teardown happens when leaving the Stubber context
+    pass
 
-        # inject needed env vars
-        os.environ['MipsOrg'] = 'testOrg'
-        os.environ['SsmPath'] = ssm_path
-        os.environ['CodesToOmit'] = omit_codes
-        os.environ['CodesToAdd'] = add_codes
-        os.environ['apiChartOfAccounts'] = chart_of_accounts_path
-        os.environ['apiValidTags'] = valid_tags_path
 
-        # create object under test
+# This needs to run before we inject environment variables
+@pytest.mark.order(before='test_mips_init')
+def test_mips_no_env_vars(ssm_stub):
+    '''
+    Test init failure due to lack of environment variables.
+    '''
+    with pytest.raises(Exception):
         mips_app = mips_api.mips.App()
 
-        # collect secure parameters
+
+def test_mips_init(ssm_stub):
+    '''
+    Inject required environment variables and test __init__
+    '''
+
+    # inject needed env vars
+    os.environ['MipsOrg'] = org_name
+    os.environ['SsmPath'] = ssm_path
+    os.environ['apiChartOfAccounts'] = api_accounts
+    os.environ['apiValidTags'] = api_tags
+    os.environ['CodesToOmit'] = omit_codes
+    os.environ['CodesToAdd'] = add_codes
+
+    # create object under test
+    mips_app = mips_api.mips.App()
+
+
+@pytest.mark.order(after='test_mips_init')
+def test_invalid_path():
+    '''Test invalid api route'''
+    # create object under test
+    mips_app = mips_api.mips.App()
+
+    # get invalid path
+    with pytest.raises(Exception):
+        mips_app.get_mips_data(api_invalid)
+
+
+@pytest.mark.order(after='test_mips_init')
+def test_get_secrets(ssm_stub):
+    '''
+    Test getting secrets from SSM
+
+    First catch an exception if no secrets are found,
+    then assert correct processing of mock secrets.
+
+    '''
+
+    # create object under test
+    mips_app = mips_api.mips.App()
+
+    # no secrets in ssm
+    ssm_stub.add_client_error('get_parameters_by_path', service_error_code='ParameterNotFound')
+    with pytest.raises(Exception):
         mips_app.collect_secrets()
-        assert mips_app._ssm_secrets == ssm_secrets
-        stub_ssm.assert_no_pending_responses()
 
-        # get chart of accouts from mips
-        mips_app.get_mips_data(chart_of_accounts_path)
-        assert mips_app.mips_dict == expected_mips_dict
-        assert login_mock.call_count == 1
-        assert chart_mock.call_count == 1
-        assert logout_mock.call_count == 1
+    # process secrets from ssm
+    ssm_stub.add_response('get_parameters_by_path', mock_ssm_params)
+    mips_app.collect_secrets()
 
-        # exception getting chart of accounts
-        requests_mock.get(mips_api.mips.App._mips_url_chart, exc=Exception)
-        with pytest.raises(Exception):
-            mips_app._collect_mips_data()
-        assert logout_mock.call_count == 2
+    # assert secrets were collected
+    assert mips_app._ssm_secrets == mock_secrets
+    ssm_stub.assert_no_pending_responses()
 
-        # get valid tag list
-        tags_json = mips_app.get_mips_data(valid_tags_path)
-        tags_list = json.loads(tags_json)
-        assert tags_list == expected_valid_tags
 
-        # get invalid path
-        with pytest.raises(Exception):
-            mips_app.get_mips_data(invalid_path)
+@pytest.mark.order(after='test_mips_init')
+def test_get_data(requests_mock):
+    '''
+    Test getting data from upstream api
 
-        # secrets are invalid
-        mips_app._ssm_secrets = {'foo': 'bar'}
-        with pytest.raises(Exception):
-            mips_app.collect_secrets()
+    Relies on `requests-mock.Mocker` fixture to inject mock responses into `requests`.
+    '''
 
-        # no secrets in ssm
-        mips_app._ssm_secrets = None
-        stub_ssm.add_client_error('get_parameters_by_path', service_error_code='ParameterNotFound')
-        with pytest.raises(Exception):
-            mips_app.collect_secrets()
+    # inject mock responses into `requests`
+    login_mock = requests_mock.post(mips_api.mips.App._mips_url_login, json=mock_token)
+    chart_mock = requests_mock.get(mips_api.mips.App._mips_url_chart, json=mock_chart)
+    logout_mock = requests_mock.post(mips_api.mips.App._mips_url_logout)
+
+    # create object under test
+    mips_app = mips_api.mips.App()
+
+    # inject secrets
+    mips_app._ssm_secrets = mock_secrets
+
+    # get chart of accounts from mips
+    mips_app._collect_mips_data()
+    assert mips_app.mips_dict == expected_mips_dict
+    assert login_mock.call_count == 1
+    assert chart_mock.call_count == 1
+    assert logout_mock.call_count == 1
+
+    # assert logout is called when an exception is raised
+    requests_mock.get(mips_api.mips.App._mips_url_chart, exc=Exception)
+    with pytest.raises(Exception):
+        mips_app._collect_mips_data()
+    assert logout_mock.call_count == 2
+
+
+@pytest.mark.order(after='test_mips_init')
+def test_show_data(requests_mock):
+    '''
+    Test getting full chart of accounts.
+    '''
+
+    # create object under test
+    mips_app = mips_api.mips.App()
+
+    # inject internal dictionary
+    mips_app.mips_dict = expected_mips_dict
+
+    # get the dictionary back
+    accounts_json = mips_app.get_mips_data(api_accounts)
+    accounts_dict = json.loads(accounts_json)
+    assert accounts_dict == expected_mips_dict
+
+
+@pytest.mark.order(after='test_mips_init')
+def test_tag_list(requests_mock):
+    '''
+    Test building a list of tags
+    '''
+
+    # create object under test
+    mips_app = mips_api.mips.App()
+
+    # inject internal dictionary
+    mips_app.mips_dict = expected_mips_dict
+
+    # get valid tag list
+    tags_json = mips_app.get_mips_data(api_tags)
+    tags_list = json.loads(tags_json)
+    assert tags_list == expected_valid_tags

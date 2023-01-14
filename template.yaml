@@ -33,7 +33,7 @@ Parameters:
     Default: '999900,999800,999700,990500'
   CodesToAdd:
     Type: String
-    Description: Comma-delimited list of key:value pairs for program codes to add.
+    Description: Comma-delimited list of code:name pairs to add to the active list.
     Default: '000000:No Program,000001:Other'
 
 Resources:
