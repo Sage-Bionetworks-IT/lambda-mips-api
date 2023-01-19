@@ -43,8 +43,8 @@ class App:
             self._extra_program_codes[k] = v
 
         api_routes = [
-            'apiChartOfAccounts',
-            'apiValidTags',
+            'ApiChartOfAccounts',
+            'ApiValidTags',
         ]
         for route_name in api_routes:
             self.api_routes[route_name] = self._get_os_var(route_name)
@@ -166,10 +166,10 @@ class App:
         Process MIPS data into requested format
         '''
 
-        if lookup == self.api_routes['apiChartOfAccounts']:
+        if lookup == self.api_routes['ApiChartOfAccounts']:
             return self._mips_dict_json()
 
-        if lookup == self.api_routes['apiValidTags']:
+        if lookup == self.api_routes['ApiValidTags']:
             return self._tag_list_json()
 
         raise Exception('Invalid API route')

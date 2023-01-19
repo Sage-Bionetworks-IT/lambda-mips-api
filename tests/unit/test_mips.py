@@ -123,8 +123,8 @@ def test_mips_init(ssm_stub):
     # inject needed env vars
     os.environ['MipsOrg'] = org_name
     os.environ['SsmPath'] = ssm_path
-    os.environ['apiChartOfAccounts'] = api_accounts
-    os.environ['apiValidTags'] = api_tags
+    os.environ['ApiChartOfAccounts'] = api_accounts
+    os.environ['ApiValidTags'] = api_tags
     os.environ['CodesToOmit'] = omit_codes
     os.environ['CodesToAdd'] = add_codes
 
