@@ -98,6 +98,9 @@ def ssm_stub():
         # the rest of this function as teardown
         yield _stub
 
+        # assert all responses were used
+        _stub.assert_no_pending_responses()
+
     # teardown happens when leaving the Stubber context
     pass
 
@@ -164,7 +167,6 @@ def test_get_secrets(ssm_stub):
 
     # assert secrets were collected
     assert mips_app._ssm_secrets == mock_secrets
-    ssm_stub.assert_no_pending_responses()
 
 
 @pytest.mark.order(after='test_mips_init')
@@ -172,7 +174,10 @@ def test_get_data(requests_mock):
     '''
     Test getting data from upstream api
 
-    Relies on `requests-mock.Mocker` fixture to inject mock responses into `requests`.
+    Relies on `requests-mock.Mocker` fixture to inject mock `requests` responses.
+    Because requests-mock creates a requests transport adapter, responses are
+    global and not thread-safe. Run two tests sequentially to maintain control
+    over mock responses.
     '''
 
     # inject mock responses into `requests`
@@ -193,8 +198,12 @@ def test_get_data(requests_mock):
     assert chart_mock.call_count == 1
     assert logout_mock.call_count == 1
 
-    # assert logout is called when an exception is raised
+    # begin a second test with an alternate requests response
+
+    # inject new mock response with an Exception
     requests_mock.get(mips_api.mips.App._mips_url_chart, exc=Exception)
+
+    # assert logout is called when an exception is raised
     with pytest.raises(Exception):
         mips_app._collect_mips_data()
     assert logout_mock.call_count == 2
