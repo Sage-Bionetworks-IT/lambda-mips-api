@@ -5,6 +5,9 @@ import boto3
 import requests
 
 
+# We are creating our App object at global scope, which means that
+# all class and object attributes will persist in the lambda runtime
+# environment to be re-used in warm lambda runs.
 class App:
     _mips_url_login = 'https://login.abilaonline.com/api/v1/sso/mipadv/login'
     _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'

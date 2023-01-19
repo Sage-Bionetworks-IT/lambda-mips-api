@@ -4,7 +4,9 @@ import json
 import os
 
 
-# this is global so that it can be mocked in test
+# This is global so that it can be mocked in test.
+# Because this is global its value will be retained
+# in the lambda environment and re-used on warm runs.
 mips_app = None
 
 
