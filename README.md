@@ -29,24 +29,57 @@ By default, the prefix is `/lambda/mipsSecret`, resulting the following required
 
 ### Template Parameters
 
+The following template parameters are used to configure CloudFormation resources
+
+| Template Parameter | Description |
+| --- | --- |
+| SsmAliasPrefix | Prepend this value to the Alias Name of the KMS key created. |
+| SsmKeyAdminArn | Grant KMS admin access to these ARNs for managing secure secrets. |
+
 The following template parameters are set as environment variables in the lambda environment:
+
 | Template Parameter | Environment Variable | Description |
 | --- | --- | --- |
-| CacheTTL | CacheTTL | Value for `max-age` in the `cache-control` header |
-| SsmParamPrefix | SsmPath | Path prefix for secure parameters |
-| MipsOrganization | MipsOrg | Log in to this organization in the finance system |
+| CacheTTL | CacheTTL | TTL value for CloudFront cache objects. |
+| MipsOrganization | MipsOrg | Log in to this organization in the finance system. |
+| SsmParamPrefix | SsmPath | Path prefix for required secure parameters. |
+| CodesToOmit | CodesToOmit | List of numeric codes to treat as inactive. |
+| CodesToAdd | CodesToAdd | List of "code:name" strings to add to the active list. |
 
 ### Triggering
 
-The CloudFormation template will output the endpoint URL that can be loaded in a browser, e.g.:
-`https://abcxyz.cloudfront.net/all/costcenters.json`
+The CloudFormation template will output all available endpoint URLs for triggering the lambda, e.g.:
+`https://abcxyz.cloudfront.net/accounts`
+`https://abcxyz.cloudfront.net/tags`
 
-### Respones Format
+These URLs can be also constructed by appending the API Gateway paths to the CloudFormation domain.
 
-The API will return a json string representing a dictionary mapping program codes to their names.
+#### Origin URL
+
+The CloudFormation template also outputs the origin URL behind the CloudFront distribution for debugging purposes.
+
+### Respones Formats
+
+#### /accounts
+
+The `/accounts` endpoint will return a json string representing a dictionary mapping numeric codes to their names.
+This dictionary represents the raw chart of accounts provided by the upstream API, without any filtering or
+deduplication of codes.
+
 E.g.:
 ```json
-{"000000": "No Program", "990300": "Program Infrastructure"}
+{"000000": "No Program", "990300": "Platform Infrastructure"}
+```
+
+#### /tags
+
+The `/tags` endpointwill return a json string representing a list of valid values for CostCenter tags.
+A valid CostCenter tag value takes the form '{Friendly Name} / {Numeric Code}'.
+Values are only generated for currently-active program codes.
+
+E.g.:
+```json
+["No Program / 000000", "Platform Infrastructure / 990300"]
 ```
 
 ### CloudFront Cache
