@@ -3,7 +3,107 @@ import mips_api
 import json
 import os
 
+import boto3
 import pytest
+from botocore.stub import Stubber
+
+
+# fixtures that don't need a setup function
+
+# environment variables
+api_accounts = '/test/accounts'
+api_tags = '/test/tags'
+org_name = 'testOrg'
+ssm_path = 'secret/path'
+omit_codes = '999900,999800'
+extra_codes = '000000:No Program,000001:Other'
+
+# neither api_accounts nor api_tags
+api_invalid = '/test/invalid'
+
+expected_omit_codes = [
+    '999900',
+    '999800',
+]
+
+expected_extra_codes = {
+    '000000': 'No Program',
+    '000001': 'Other',
+}
+
+# mock secrets (good)
+mock_secrets = {
+    'user': 'test',
+    'pass': 'test',
+}
+
+# mock return from SSM (good)
+mock_ssm_params = {
+    'Parameters': [
+        {'Name': k, 'Value': v} for k, v in mock_secrets.items()
+    ]
+}
+
+# mock secrets (bad)
+mock_secrets_bad = {
+    'foo': 'bar',
+}
+
+# mock return from SSM (bad)
+mock_ssm_params_bad = {
+    'Parameters': [
+        {'Name': k, 'Value': v} for k, v in mock_secrets_bad.items()
+    ]
+}
+
+# mock access token
+mock_token = {
+    'AccessToken': 'testToken',
+}
+
+# mock chart of accounts response from upstream api
+mock_chart = {
+    'data': [
+        {
+            'accountCodeId': '12345600',
+            'accountTitle': 'Other Program A',
+        },
+        {
+            'accountCodeId': '12345601',
+            'accountTitle': 'Other Program B',
+        },
+        {
+            'accountCodeId': '12345',
+            'accountTitle': 'Inactive',
+        },
+        {
+            'accountCodeId': '99030000',
+            'accountTitle': 'Platform Infrastructure',
+        },
+        {
+            'accountCodeId': '99990000',
+            'accountTitle': 'Unfunded',
+        },
+    ]
+}
+
+# expected internal dictionary
+expected_mips_dict = {
+    '12345600': 'Other Program A',
+    '12345601': 'Other Program B',
+    '12345': 'Inactive',
+    '99030000': 'Platform Infrastructure',
+    '99990000': 'Unfunded',
+}
+
+# expected tag list
+expected_tag_list = [
+    'No Program / 000000',
+    'Other / 000001',
+    'Other Program A / 123456',
+    'Other Program B / 123456',
+    'Platform Infrastructure / 990300',
+]
 
 
 def apigw_event(path):
@@ -63,56 +163,175 @@ def apigw_event(path):
 
 
 @pytest.fixture()
-def test_event():
-    return apigw_event('/test/path')
+def accounts_event():
+    return apigw_event(api_accounts)
 
 
-def test_lambda_handler(test_event, mocker):
-    # mock the App class
-    mips_api.mips_app = mocker.MagicMock(spec=mips_api.mips.App)
+@pytest.fixture()
+def tags_event():
+    return apigw_event(api_tags)
 
-    # no cache ttl
-    ret = mips_api.lambda_handler({}, "")
+
+@pytest.fixture()
+def invalid_event():
+    return apigw_event(api_invalid)
+
+
+
+def test_secrets(mocker):
+    '''Test getting secret parameters from SSM'''
+    # stub ssm client
+    ssm = boto3.client('ssm')
+    mips_api.ssm_client = ssm
+    with Stubber(ssm) as _stub:
+            # inject mock parameters
+            _stub.add_response('get_parameters_by_path', mock_ssm_params)
+
+            # assert secrets were collected
+            secrets = mips_api.collect_secrets(ssm_path)
+            assert secrets == mock_secrets
+
+
+def test_no_secrets():
+    '''Test failure getting secret parameters from SSM'''
+    # stub ssm client
+    ssm = boto3.client('ssm')
+    mips_api.ssm_client = ssm
+    with Stubber(ssm) as _stub:
+        # raise exception getting parameters
+        _stub.add_client_error('get_parameters_by_path', service_error_code='ParameterNotFound')
+
+        # assert Exception is raised
+        with pytest.raises(Exception):
+            secrets = mips_api.collect_secrets(ssm_path)
+
+
+def test_bad_secrets():
+    '''Test failure getting secret parameters from SSM'''
+    # stub ssm client
+    ssm = boto3.client('ssm')
+    mips_api.ssm_client = ssm
+    with Stubber(ssm) as _stub:
+        # raise exception getting parameters
+        _stub.add_response('get_parameters_by_path', mock_ssm_params_bad)
+
+        # assert Exception is raised
+        with pytest.raises(Exception):
+            secrets = mips_api.collect_secrets(ssm_path)
+
+
+def test_chart(requests_mock):
+    '''
+    Test getting chart of accounts from upstream API
+
+    Relies on `requests-mock.Mocker` fixture to inject mock `requests` responses.
+    Because requests-mock creates a requests transport adapter, responses are
+    global and not thread-safe. Run two tests sequentially to maintain control
+    over response order.
+    '''
+
+    # inject mock responses into `requests`
+    login_mock = requests_mock.post(mips_api._mips_url_login, json=mock_token)
+    chart_mock = requests_mock.get(mips_api._mips_url_chart, json=mock_chart)
+    logout_mock = requests_mock.post(mips_api._mips_url_logout)
+
+    # get chart of accounts from mips
+    mips_dict = mips_api.collect_chart(org_name, mock_secrets)
+
+    # assert expected data
+    assert mips_dict == expected_mips_dict
+
+    # assert all mock urls were called
+    assert login_mock.call_count == 1
+    assert chart_mock.call_count == 1
+    assert logout_mock.call_count == 1
+
+    # begin a second test with an alternate requests response
+
+    # inject new mock response with an Exception
+    requests_mock.get(mips_api._mips_url_chart, exc=Exception)
+
+    # assert logout is called when an exception is raised
+    with pytest.raises(Exception):
+        mips_api.collect_chart(org_name, mock_secrets)
+    assert logout_mock.call_count == 2
+
+
+def test_parse_omit():
+    parsed_omit_codes = mips_api._parse_omit_codes(omit_codes)
+    assert parsed_omit_codes == expected_omit_codes
+
+
+def test_parse_extra():
+    parsed_extra_codes = mips_api._parse_extra_codes(extra_codes)
+    assert parsed_extra_codes == expected_extra_codes
+
+
+def test_tags(mocker):
+    '''Testing building tag list from collected chart of accounts'''
+
+    # assert expected tag list
+    tag_list = mips_api.list_tags(expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    assert tag_list == expected_tag_list
+
+
+def test_lambda_handler_no_env(invalid_event):
+    '''Test lambda handler with no environment variables set'''
+    ret = mips_api.lambda_handler(invalid_event, None)
+    json_body = json.loads(ret["body"])
+    assert json_body['error'].startswith('The environment variable') == True
     assert ret['statusCode'] == 500
-    assert ret['body'] == 'Missing environment variable: CacheTTL'
 
-    # inject cache ttl env var
-    os.environ['CacheTTL'] = '10'
 
-    # invalid event / no path
-    ret = mips_api.lambda_handler({}, "")
-    assert ret['statusCode'] == 400
+def _test_with_env(mocker, event, code, body=None, error=None):
+    '''Keep lambda_handler tests DRY'''
 
-    json_data = json.loads(ret["body"])
-    assert json_data == {'error': 'Invalid event: No path found: {}'}
+    # mock environment variables
+    env_vars = {
+        'MipsOrg': org_name,
+        'SsmPath': ssm_path,
+        'ApiChartOfAccounts': api_accounts,
+        'ApiValidTags': api_tags,
+        'CodesToOmit': omit_codes,
+        'CodesToAdd': extra_codes,
+    }
+    mocker.patch.dict(os.environ, env_vars)
 
-    # success
-    success = 'test success'
-    mips_api.mips_app.get_mips_data.return_value = success
-    ret = mips_api.lambda_handler(test_event, "")
-    assert ret['statusCode'] == 200
+    # mock out collect_secrets() with mock secrets
+    mocker.patch('mips_api.collect_secrets', return_value=mock_secrets)
 
-    json_data = json.loads(ret["body"])
-    assert json_data == success
+    # mock out collect_chart() with mock chart
+    mocker.patch('mips_api.collect_chart', return_value=expected_mips_dict)
 
-    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])
+    # mock out collect_tags() with mock tags
+    mocker.patch('mips_api.list_tags', return_value=expected_tag_list)
 
-    # mips api failure
-    mips_exc = 'test failure'
-    mips_api.mips_app.get_mips_data.side_effect = Exception(mips_exc)
-    ret = mips_api.lambda_handler(test_event, "")
-    assert ret['statusCode'] == 500
+    # test event
+    ret = mips_api.lambda_handler(event, None)
+    json_body = json.loads(ret["body"])
 
-    json_data = json.loads(ret["body"])
-    assert json_data == {'error': mips_exc}
+    if error is not None:
+        assert json_body['error'] == error
 
-    mips_api.mips_app.get_mips_data.assert_called_with(test_event['path'])
+    elif body is not None:
+        assert json_body == body
 
-    # init failure
-    init_exc = 'App initialization failure'
-    mips_api.mips_app.collect_secrets.side_effect = Exception(init_exc)
-    ret = mips_api.lambda_handler({}, "")
-    assert ret['statusCode'] == 500
+    assert ret['statusCode'] == code
 
-    json_data = json.loads(ret["body"])
-    assert json_data == {'error': init_exc}
+
+def test_lambda_handler_invalid_path(invalid_event, mocker):
+    '''Test event with no path'''
+
+    _test_with_env(mocker, invalid_event, 404, error='Invalid request path')
+
+
+def test_lambda_handler_accounts(accounts_event, mocker):
+    '''Test chart-of-accounts event'''
+
+    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict)
+
+
+def test_lambda_handler_tags(tags_event, mocker):
+    '''Test tag-list event'''
+
+    _test_with_env(mocker, tags_event, 200, body=expected_tag_list)

@@ -6,7 +6,7 @@ Description: >
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 10
+    Timeout: 15
 
 Parameters:
   MipsOrganization:
@@ -27,6 +27,14 @@ Parameters:
     Type: Number
     Default: 86400
     Description: Maximum number of seconds until cached responses expire; default 86400 (1 day)
+  CodesToOmit:
+    Type: String
+    Description: Comma-delimited list of numeric codes to ignore (treat as inactive).
+    Default: '999900,999800,999700,990500'
+  CodesToAdd:
+    Type: String
+    Description: Comma-delimited list of code:name pairs to add to the active list.
+    Default: '000000:No Program,000001:Other'
 
 Resources:
   Function:
@@ -37,16 +45,24 @@ Resources:
       Runtime: python3.9
       Environment:
         Variables:
+          ApiChartOfAccounts: '/accounts'
+          ApiValidTags: '/tags'
+          CacheTTL: !Ref CacheTTL
           MipsOrg: !Ref MipsOrganization
           SsmPath: !Ref SsmParamPrefix
-          CacheTTL: !Ref CacheTTL
-          apiAllCostCenters: '/all/costcenters.json'
+          CodesToOmit: !Ref CodesToOmit
+          CodesToAdd: !Ref CodesToAdd
       Role: !GetAtt FunctionRole.Arn
       Events:
-        AllCostCenters:
+        ChartOfAccounts:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: '/all/costcenters.json'
+            Path: '/accounts'
+            Method: get
+        ValidTags:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: '/tags'
             Method: get
 
   FunctionRole:   # execute lambda function with this role
@@ -160,11 +176,14 @@ Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  CloudfrontAllCostCenters:
-    Description: "CloudFront URL for function"
-    Value: !Sub "https://${CloudFrontCache.DomainName}/all/costcenters.json"
+  ApiRouteChartOfAccounts:
+    Description: "CloudFront URL for the full chart of accounts"
+    Value: !Sub "https://${CloudFrontCache.DomainName}/accounts"
+  ApiRouteValidTags:
+    Description: "CloudFront URL for listing valid CostCenter tag values"
+    Value: !Sub "https://${CloudFrontCache.DomainName}/tags"
   OriginUrl:
-    Description: "API Gateway origin URL with stage"
+    Description: "API Gateway origin URL with stage (for debugging)"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
   FunctionArn:
     Description: "Lambda Function ARN"
