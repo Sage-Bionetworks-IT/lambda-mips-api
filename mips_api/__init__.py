@@ -1,9 +1,13 @@
 import json
+import logging
 import os
 
 import boto3
 import requests
 
+
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.INFO)
 
 _mips_url_login = 'https://login.abilaonline.com/api/v1/sso/mipadv/login'
 _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'
@@ -58,7 +62,7 @@ def collect_secrets(ssm_path):
             else:
                 name = p['Name']
             ssm_secrets[name] = p['Value']
-            print(f"Loaded secret: {name}")
+            LOG.info(f"Loaded secret: {name}")
     else:
         raise Exception(f"Invalid response from SSM client")
 
@@ -108,7 +112,7 @@ def collect_chart(org_name, secrets):
             mips_dict[a['accountCodeId']] = a['accountTitle']
 
     except Exception as exc:
-        print('Error interacting with mips')
+        LOG.error('Error interacting with mips')
         raise exc
 
     finally:
@@ -159,7 +163,7 @@ def list_tags(params, chart_dict, omit_list, extra_dict):
                 raise TypeError(err_str)
 
     if limit > 0:
-        print(f"limiting output to {limit} values")
+        LOG.info(f"limiting output to {limit} values")
         return tags[0:limit]
     else:
         return tags

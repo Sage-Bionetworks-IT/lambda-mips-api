@@ -26,7 +26,7 @@ In the event of a cache hit, Cloudfront will return the cached value without tri
 
 | Query String Parameter | Valid Routes | Description |
 | --- | --- | --- |
-| limit | /tags | Return no more than `limit` valid tags. Must be an integer. |
+| limit | /tags | Return no more than `limit` valid tags. Must be an integer greater than zero. |
 
 ### Required Secure Parameters
 
