@@ -42,6 +42,7 @@ The following template parameters are used to configure CloudFormation resources
 
 | Template Parameter | Description |
 | --- | --- |
+| CacheTTL | TTL value for CloudFront cache objects. |
 | SsmAliasPrefix | Prepend this value to the Alias Name of the KMS key created. |
 | SsmKeyAdminArn | Grant KMS admin access to these ARNs for managing secure secrets. |
 
@@ -49,23 +50,27 @@ The following template parameters are set as environment variables in the lambda
 
 | Template Parameter | Environment Variable | Description |
 | --- | --- | --- |
-| CacheTTL | CacheTTL | TTL value for CloudFront cache objects. |
 | MipsOrganization | MipsOrg | Log in to this organization in the finance system. |
 | SsmParamPrefix | SsmPath | Path prefix for required secure parameters. |
 | CodesToOmit | CodesToOmit | List of numeric codes to treat as inactive. |
 | CodesToAdd | CodesToAdd | List of "code:name" strings to add to the active list. |
+| CostCenterTags | CostCenterTags | List of AWS Tag names that may contain a cost center. |
 
 ### Triggering
 
 The CloudFormation template will output all available endpoint URLs for triggering the lambda, e.g.:
-`https://abcxyz.cloudfront.net/accounts`
-`https://abcxyz.cloudfront.net/tags`
+
+| Output Name | Example Value |
+| --- | --- |
+| ApiRouteChartOfAccounts | https://abcxyz.cloudfront.net/accounts |
+| ApiRouteValidTags | https://abcxyz.cloudfront.net/tags |
+| ApiRouteCostCategoryRules | https://abcxyz.cloudfront.net/rules |
 
 These URLs can be also constructed by appending the API Gateway paths to the CloudFormation domain.
 
 #### Origin URL
 
-The CloudFormation template also outputs the origin URL behind the CloudFront distribution for debugging purposes.
+The CloudFormation template also outputs the origin URL behind the CloudFront distribution for debugging the lambda.
 
 ### Respones Formats
 

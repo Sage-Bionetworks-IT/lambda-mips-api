@@ -52,7 +52,6 @@ Resources:
           ApiChartOfAccounts: '/accounts'
           ApiValidTags: '/tags'
           ApiCostCategoryRules: '/rules'
-          CacheTTL: !Ref CacheTTL
           MipsOrg: !Ref MipsOrganization
           SsmPath: !Ref SsmParamPrefix
           CodesToOmit: !Ref CodesToOmit
