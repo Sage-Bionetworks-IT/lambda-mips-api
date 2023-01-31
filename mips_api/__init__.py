@@ -1,9 +1,13 @@
 import json
+import logging
 import os
 
 import boto3
 import requests
 
+
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.INFO)
 
 _mips_url_login = 'https://login.abilaonline.com/api/v1/sso/mipadv/login'
 _mips_url_chart = 'https://mipapi.abilaonline.com/api/v1/maintain/chartofaccounts'
@@ -58,7 +62,7 @@ def collect_secrets(ssm_path):
             else:
                 name = p['Name']
             ssm_secrets[name] = p['Value']
-            print(f"Loaded secret: {name}")
+            LOG.info(f"Loaded secret: {name}")
     else:
         raise Exception(f"Invalid response from SSM client")
 
@@ -108,7 +112,7 @@ def collect_chart(org_name, secrets):
             mips_dict[a['accountCodeId']] = a['accountTitle']
 
     except Exception as exc:
-        print('Error interacting with mips')
+        LOG.error('Error interacting with mips')
         raise exc
 
     finally:
@@ -121,7 +125,7 @@ def collect_chart(org_name, secrets):
     return mips_dict
 
 
-def list_tags(chart_dict, omit_list, extra_dict):
+def list_tags(params, chart_dict, omit_list, extra_dict):
     '''
     Generate a list of valid AWS tags. Only active codes are listed.
 
@@ -132,7 +136,9 @@ def list_tags(chart_dict, omit_list, extra_dict):
     '''
 
     tags = []
+    found_codes = []
 
+    # inject extra cost centers
     for code, name in extra_dict.items():
         tags.append(f"{name} / {code}")
 
@@ -142,11 +148,25 @@ def list_tags(chart_dict, omit_list, extra_dict):
         if len(code) > 5: # only include active codes
             short = code[:6]  # ignore the last two digits on active codes
             if short not in omit_list:
-                tag = f"{name} / {short}"
-                if tag not in tags:
+                if short not in found_codes:
+                    tag = f"{name} / {short}"
                     tags.append(tag)
+                    found_codes.append(short)
 
-    return tags
+    limit = 0
+    if params:
+        if 'limit' in params:
+            try:
+                limit = int(params['limit'])
+            except TypeError as exc:
+                err_str = "QueryStringParameter 'limit' must be an Integer"
+                raise TypeError(err_str)
+
+    if limit > 0:
+        LOG.info(f"limiting output to {limit} values")
+        return tags[0:limit]
+    else:
+        return tags
 
 
 def lambda_handler(event, context):
@@ -199,6 +219,11 @@ def lambda_handler(event, context):
         # get chart of accounts from mips
         mips_chart = collect_chart(mips_org)
 
+        # collect query-string parameters
+        params = {}
+        if 'queryStringParameters' in event:
+            params = event['queryStringParameters']
+
         # parse the path and return appropriate data
         if 'path' in event:
             event_path = event['path']
@@ -209,7 +234,7 @@ def lambda_handler(event, context):
 
             elif event_path == api_routes['ApiValidTags']:
                 try:
-                    valid_tags = list_tags(omit_codes_list, extra_codes_dict)
+                    valid_tags = list_tags(params, mips_chart, omit_codes_list, extra_codes_dict)
                 except Exception as exc:
                     return _build_return(500, {"error": str(exc)})
 

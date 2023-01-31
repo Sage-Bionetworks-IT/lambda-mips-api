@@ -73,7 +73,7 @@ mock_chart = {
             'accountTitle': 'Other Program B',
         },
         {
-            'accountCodeId': '12345',
+            'accountCodeId': '54321',
             'accountTitle': 'Inactive',
         },
         {
@@ -91,7 +91,7 @@ mock_chart = {
 expected_mips_dict = {
     '12345600': 'Other Program A',
     '12345601': 'Other Program B',
-    '12345': 'Inactive',
+    '54321': 'Inactive',
     '99030000': 'Platform Infrastructure',
     '99990000': 'Unfunded',
 }
@@ -101,12 +101,17 @@ expected_tag_list = [
     'No Program / 000000',
     'Other / 000001',
     'Other Program A / 123456',
-    'Other Program B / 123456',
     'Platform Infrastructure / 990300',
 ]
 
+# mock query-string parameter
+mock_limit_param = { 'limit': 3 }
 
-def apigw_event(path):
+# expected tag list with limit
+expected_tag_limit_list = expected_tag_list[0:3]
+
+
+def apigw_event(path, qsp={"foo": "bar"}):
     """ Generates API GW Event"""
 
     return {
@@ -134,7 +139,7 @@ def apigw_event(path):
             },
             "stage": "prod",
         },
-        "queryStringParameters": {"foo": "bar"},
+        "queryStringParameters": qsp,
         "headers": {
             "Via": "1.1 08f323deadbeefa7af34d5feb414ce27.cloudfront.net (CloudFront)",
             "Accept-Language": "en-US,en;q=0.8",
@@ -163,6 +168,11 @@ def apigw_event(path):
 
 
 @pytest.fixture()
+def invalid_event():
+    return apigw_event(api_invalid)
+
+
+@pytest.fixture()
 def accounts_event():
     return apigw_event(api_accounts)
 
@@ -173,8 +183,8 @@ def tags_event():
 
 
 @pytest.fixture()
-def invalid_event():
-    return apigw_event(api_invalid)
+def tags_limit_event():
+    return apigw_event(api_tags, qsp=mock_limit_param)
 
 
 
@@ -267,12 +277,20 @@ def test_parse_extra():
     assert parsed_extra_codes == expected_extra_codes
 
 
-def test_tags(mocker):
+def test_tags():
     '''Testing building tag list from collected chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    tag_list = mips_api.list_tags(None, expected_mips_dict, expected_omit_codes, expected_extra_codes)
     assert tag_list == expected_tag_list
+
+
+def test_tags_limit():
+    '''Testing building tag list from collected chart of accounts'''
+
+    # assert expected tag list
+    tag_list = mips_api.list_tags(mock_limit_param, expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    assert tag_list == expected_tag_limit_list
 
 
 def test_lambda_handler_no_env(invalid_event):
@@ -303,9 +321,6 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     # mock out collect_chart() with mock chart
     mocker.patch('mips_api.collect_chart', return_value=expected_mips_dict)
 
-    # mock out collect_tags() with mock tags
-    mocker.patch('mips_api.list_tags', return_value=expected_tag_list)
-
     # test event
     ret = mips_api.lambda_handler(event, None)
     json_body = json.loads(ret["body"])
@@ -335,3 +350,9 @@ def test_lambda_handler_tags(tags_event, mocker):
     '''Test tag-list event'''
 
     _test_with_env(mocker, tags_event, 200, body=expected_tag_list)
+
+
+def test_lambda_handler_tags_limit(tags_limit_event, mocker):
+    '''Test tag-list event'''
+
+    _test_with_env(mocker, tags_limit_event, 200, body=expected_tag_limit_list)
