@@ -77,15 +77,19 @@ mock_chart = {
     'data': [
         {
             'accountCodeId': '12345600',
-            'accountTitle': 'Other Program A',
+            'accountTitle': 'Program Part A',
         },
         {
             'accountCodeId': '12345601',
-            'accountTitle': 'Other Program B',
+            'accountTitle': 'Program Part B',
         },
         {
             'accountCodeId': '54321',
             'accountTitle': 'Inactive',
+        },
+        {
+            'accountCodeId': '65432100',
+            'accountTitle': 'Other Program',
         },
         {
             'accountCodeId': '99030000',
@@ -100,9 +104,10 @@ mock_chart = {
 
 # expected raw chart of accounts
 expected_raw_dict = {
-    '12345600': 'Other Program A',
-    '12345601': 'Other Program B',
+    '12345600': 'Program Part A',
+    '12345601': 'Program Part B',
     '54321': 'Inactive',
+    '65432100': 'Other Program',
     '99030000': 'Platform Infrastructure',
     '99990000': 'Unfunded',
 }
@@ -111,7 +116,8 @@ expected_raw_dict = {
 expected_mips_dict = {
     '000000': 'No Program',
     '000001': 'Other',
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+    '654321': 'Other Program',
     '990300': 'Platform Infrastructure',
 }
 
@@ -119,7 +125,8 @@ expected_mips_dict = {
 expected_tag_list = [
     'No Program / 000000',
     'Other / 000001',
-    'Other Program A / 123456',
+    'Program Part A / 123456',
+    'Other Program / 654321',
     'Platform Infrastructure / 990300',
 ]
 
@@ -129,12 +136,52 @@ mock_limit_param = { 'limit': 3 }
 # expected tag list with limit
 expected_tag_limit_list = expected_tag_list[0:3]
 
-mock_account_tags = {
+# mock return for list_accounts()
+mock_account_list = {
+    'Accounts': [
+        { 'Id': '111222333444', },
+        { 'Id': '222333444555', },
+        { 'Id': '333444555666', },
+    ]
+}
+
+# mock return for list_tags_for_resource()
+mock_resource_tags_a = {
+    'Tags': [
+        {
+            'Key': 'CostCenter',
+            'Value': "Program Part A / 123456",
+        },
+    ]
+}
+
+mock_resource_tags_b = {
+    'Tags': [
+        {
+            'Key': 'CostCenter',
+            'Value': "Program Part B / 123456",
+        },
+    ]
+}
+
+# mock return for list_tags_for_resource()
+mock_resource_tags_other = {
+    'Tags': [
+        {
+            'Key': 'CostCenter',
+            'Value': "Other Program / 654321",
+        },
+    ]
+}
+
+# expected account code dictionary
+expected_account_codes = {
     '123456': [
         '111222333444',
+        '333444555666',
     ],
-    '990300': [
-        '555666777888',
+    '654321': [
+        '222333444555',
     ],
 }
 
@@ -154,18 +201,24 @@ expected_rules = {
             'TagStartsWith': [ '000001', ],
         },
         {
-            'Value': '123456 Other Program A',
+            'Value': '123456 Program Part A',
             'TagNames': [ 'CostCenterOther', 'CostCenter' ],
             'TagEndsWith': [ '123456', ],
             'TagStartsWith': [ '123456', ],
-            'Accounts': [ '111222333444', ],
+            'Accounts': [ '111222333444', '333444555666' ],
+        },
+        {
+            'Value': '654321 Other Program',
+            'TagNames': [ 'CostCenterOther', 'CostCenter' ],
+            'TagEndsWith': [ '654321', ],
+            'TagStartsWith': [ '654321', ],
+            'Accounts': [ '222333444555', ],
         },
         {
             'Value': '990300 Platform Infrastructure',
             'TagNames': [ 'CostCenterOther', 'CostCenter' ],
             'TagEndsWith': [ '990300', ],
             'TagStartsWith': [ '990300', ],
-            'Accounts': [ '555666777888', ],
         },
     ],
     'InheritedValues': {
@@ -256,7 +309,7 @@ def rules_event():
     return apigw_event(api_rules)
 
 
-def test_secrets(mocker):
+def test_secrets():
     '''Test getting secret parameters from SSM'''
     # stub ssm client
     ssm = boto3.client('ssm')
@@ -335,6 +388,29 @@ def test_collect_chart(requests_mock):
     assert logout_mock.call_count == 2
 
 
+def test_account_codes():
+    '''Test getting account code mapping from account tags'''
+    # stub organizations client
+    org = boto3.client('organizations')
+    mips_api.org_client = org
+    with Stubber(org) as _stub:
+            # inject mock account response
+            _stub.add_response('list_accounts', mock_account_list)
+
+            # inject a mock tags response for each mock account
+
+            # we are using two codes for three accounts to ensure
+            # that accounts are properly grouped under the code
+            # found in their respective tags
+            _stub.add_response('list_tags_for_resource', mock_resource_tags_a)
+            _stub.add_response('list_tags_for_resource', mock_resource_tags_other)
+            _stub.add_response('list_tags_for_resource', mock_resource_tags_b)
+
+            # assert codes were collected
+            found_occount_codes = mips_api.collect_account_tag_codes(costcenter_tag_list)
+            assert found_occount_codes == expected_account_codes
+
+
 def test_process_chart():
     '''Test processing  codes to add / remove'''
 
@@ -379,7 +455,7 @@ def test_rules():
     '''Testing building rules snippet from processed chart of accounts'''
 
     # assert expected rules
-    rules_snippet = mips_api.list_rules(None, expected_mips_dict, costcenter_tag_list)
+    rules_snippet = mips_api.list_rules(expected_mips_dict, costcenter_tag_list, expected_account_codes)
     assert rules_snippet == expected_rules
 
 
@@ -421,11 +497,6 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     mocker.patch('mips_api.process_chart',
                  autospec=True,
                  return_value=expected_mips_dict)
-
-    # mock out collect_account_tags() with mock tags
-    mocker.patch('mips_api.collect_account_tags',
-                 autospec=True,
-                 return_value=mock_account_tags)
 
     # test event
     ret = mips_api.lambda_handler(event, None)
@@ -483,6 +554,11 @@ def test_lambda_handler_tags_limit(tags_limit_event, mocker):
 
 def test_lambda_handler_rules(rules_event, mocker):
     '''Test rule-list event'''
+
+    # mock out collect_account_tag_codes() with mock tags
+    mocker.patch('mips_api.collect_account_tag_codes',
+                 autospec=True,
+                 return_value=expected_account_codes)
 
     # mock out list_rules() with mock tags
     mocker.patch('mips_api.list_rules',

@@ -99,6 +99,11 @@ Resources:
                 Action:
                   - 'ssm:GetParameter*'
                 Effect: Allow
+              - Resource: '*'
+                Action:
+                  - 'organizations:ListAccounts'
+                  - 'organizations:ListTagsForResource'
+                Effect: Allow
 
   CloudFrontCache:
     Type: AWS::CloudFront::Distribution
@@ -126,8 +131,7 @@ Resources:
         DefaultTTL: !Ref CacheTTL
         ParametersInCacheKeyAndForwardedToOrigin:
           EnableAcceptEncodingGzip: true
-          # Don't pass any client cookies, headers, or query strings
-          # to the lambda because we don't need them
+          # Only pass query strings to the lambda, not cookies or headers
           CookiesConfig:
             CookieBehavior: none
           HeadersConfig:

@@ -24,6 +24,7 @@ _mips_url_logout = 'https://mipapi.abilaonline.com/api/security/logout'
 # Because this is global its value will be retained
 # in the lambda environment and re-used on warm runs.
 ssm_client = None
+org_client = None
 
 
 def _get_os_var(varnam):
@@ -56,6 +57,16 @@ def _parse_env_dict(extra_codes):
         k, v = _kv_pair.split(':', 1)
         data[k] = v
     return data
+
+
+def _strip_special_chars(value):
+    '''
+    The name of a cost category must adhere to: ^(?! )[\p{L}\p{N}\p{Z}-_]*(?<! )$
+
+    Replace any disallowed characters with '_'
+    '''
+    return re.sub('[^a-zA-Z0-9 -]', '_', value)
+
 
 def collect_secrets(ssm_path):
     '''Collect secure parameters from SSM'''
@@ -145,6 +156,60 @@ def collect_chart(org_name, secrets):
     return mips_dict
 
 
+def collect_account_tag_codes(tag_names):
+    '''
+    Query Account tags for cost center values to use as
+    fallback values for resources in the account.
+    '''
+
+    account_codes = {}
+
+    # create boto client
+    global org_client
+    if org_client is None:
+        org_client = boto3.client('organizations')
+
+    # get list of accounts
+    account_pages = org_client.get_paginator('list_accounts').paginate()
+
+    # check for tags on each account
+    for account_page in account_pages:
+        for account in account_page['Accounts']:
+            account_id = account['Id']
+
+            tag_pager = org_client.get_paginator('list_tags_for_resource')
+            tag_pages = tag_pager.paginate(ResourceId=account_id)
+
+            cost_center = None
+            for tag_page in tag_pages:
+                for tag in tag_page['Tags']:
+                    if tag['Key'] in tag_names:
+                        cost_center = tag['Value']
+
+                        # get a 6-digit numeric code from the tag
+                        found = re.search(r'[0-9]{6}', cost_center)
+
+                        if found is None:
+                            LOG.warning(f"No numeric code found in tag: {cost_center}")
+                            continue
+
+                        code = found.group(0)
+
+                        if code in account_codes:
+                            account_codes[code].append(account_id)
+                        else:
+                            account_codes[code] = [ account_id, ]
+
+                        # stop processing tags for this page
+                        break
+
+                if cost_center is not None:
+                    # stop processing tag pages for this account
+                    break
+
+    return account_codes
+
+
 def process_chart(chart_dict, omit_list, extra_dict):
     '''
     Process chart of accounts to remove unneeded programs,
@@ -212,29 +277,7 @@ def list_tags(params, chart_dict):
         return tags
 
 
-def collect_account_tags(tag_names):
-    #TODO: look up tags on accoutns in aws
-
-    return {
-        '123456': [
-            '111222333444',
-        ],
-        '990300': [
-            '555666777888',
-        ],
-    }
-
-
-def _strip_special_chars(value):
-    '''
-    The name of a cost category must adhere to: ^(?! )[\p{L}\p{N}\p{Z}-_]*(?<! )$
-
-    Replace any disallowed characters with '_'
-    '''
-    return re.sub('[^a-zA-Z0-9 -]', '_', value)
-
-
-def list_rules(params, chart_dict, tags):
+def list_rules(chart_dict, tags, account_codes):
     '''
     Output a CloudFormation template snippet to pass to our
     cost category rule generator macro.
@@ -264,9 +307,8 @@ def list_rules(params, chart_dict, tags):
             'TagStartsWith': [ code, ],
         }
 
-        account_tags = collect_account_tags(tags)
-        if code in account_tags:
-            rule['Accounts'] = account_tags[code]
+        if code in account_codes:
+            rule['Accounts'] = account_codes[code]
 
         snippet['RegularValues'].append(rule)
 
@@ -381,6 +423,7 @@ def lambda_handler(event, context):
 
             elif event_path == api_routes['ApiValidTags']:
                 try:
+                    # build a list of valid tags
                     valid_tags = list_tags(params, mips_chart)
                     return _build_return(200, obj=valid_tags)
                 except Exception as exc:
@@ -388,7 +431,11 @@ def lambda_handler(event, context):
 
             elif event_path == api_routes['ApiCostCategoryRules']:
                 try:
-                    rule_snippet = list_rules(params, mips_chart, aws_tags)
+                    # scan account tags for account codes
+                    account_codes = collect_account_tag_codes(aws_tags)
+
+                    # build the rule snippet
+                    rule_snippet = list_rules(mips_chart, aws_tags, account_codes)
                     return _build_return(200, obj=rule_snippet, ctype='yaml')
                 except Exception as exc:
                     return _build_return(500, obj={"error": str(exc)})
