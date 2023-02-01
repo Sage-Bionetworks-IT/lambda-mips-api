@@ -191,3 +191,8 @@ Outputs:
   FunctionRoleArn:
     Description: "Implicit IAM Role created for function"
     Value: !GetAtt FunctionRole.Arn
+  CloudfrontDomain:
+    Description: "Domain name for the Cloudfront distribution"
+    Value: !GetAtt CloudFrontCache.DomainName
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-CloudfrontDomain'
