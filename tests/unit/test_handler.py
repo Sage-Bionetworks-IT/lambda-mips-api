@@ -316,10 +316,14 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     mocker.patch.dict(os.environ, env_vars)
 
     # mock out collect_secrets() with mock secrets
-    mocker.patch('mips_api.collect_secrets', return_value=mock_secrets)
+    mocker.patch('mips_api.collect_secrets',
+                 autospec=True,
+                 return_value=mock_secrets)
 
     # mock out collect_chart() with mock chart
-    mocker.patch('mips_api.collect_chart', return_value=expected_mips_dict)
+    mocker.patch('mips_api.collect_chart',
+                 autospec=True,
+                 return_value=expected_mips_dict)
 
     # test event
     ret = mips_api.lambda_handler(event, None)
