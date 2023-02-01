@@ -217,7 +217,7 @@ def lambda_handler(event, context):
         ssm_secrets = collect_secrets(ssm_path)
 
         # get chart of accounts from mips
-        mips_chart = collect_chart(mips_org)
+        mips_chart = collect_chart(mips_org, ssm_secrets)
 
         # collect query-string parameters
         params = {}
