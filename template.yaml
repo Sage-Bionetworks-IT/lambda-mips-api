@@ -9,6 +9,14 @@ Globals:
     Timeout: 15
 
 Parameters:
+  AcmCertificateArn:
+    Description: The Amazon Resource Name (ARN) of an AWS Certificate Manager (ACM) certificate.
+    Type: String
+    Default: ""
+  DnsNames:
+    Type: CommaDelimitedList
+    Description: List of role ARNs to manage the encryption key
+    Default: ""
   MipsOrganization:
     Type: String
     Description: Log in to this organization in the finance system
@@ -35,6 +43,12 @@ Parameters:
     Type: String
     Description: Comma-delimited list of code:name pairs to add to the active list.
     Default: '000000:No Program,000001:Other'
+
+
+Conditions:
+  HasAcmCertificateArn: !Not [ !Equals [ !Ref AcmCertificateArn, "" ] ]
+  # Join on an empty string because DnsNames is a comma-delimited list, not a string
+  HasDnsNames: !Not [ !Equals [ !Join [ "", !Ref DnsNames ], "" ] ]
 
 Resources:
   Function:
@@ -104,6 +118,13 @@ Resources:
             OriginPath: /Prod
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
+        HttpVersion: http2
+        Aliases: !If [ HasDnsNames, !Ref DnsNames, !Ref "AWS::NoValue" ]
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: !If [ HasAcmCertificateArn, !Ref "AWS::NoValue", True ]
+          AcmCertificateArn: !If [ HasAcmCertificateArn, !Ref AcmCertificateArn, !Ref "AWS::NoValue" ]
+          MinimumProtocolVersion: !If [ HasAcmCertificateArn, "TLSv1.2_2021", !Ref "AWS::NoValue" ]
+          SslSupportMethod: !If [ HasAcmCertificateArn, "sni-only", !Ref "AWS::NoValue" ]
 
   CloudFrontCachePolicy:
     Type: AWS::CloudFront::CachePolicy
@@ -191,3 +212,8 @@ Outputs:
   FunctionRoleArn:
     Description: "Implicit IAM Role created for function"
     Value: !GetAtt FunctionRole.Arn
+  CloudfrontDomain:
+    Description: "Domain name for the Cloudfront distribution"
+    Value: !GetAtt CloudFrontCache.DomainName
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-CloudfrontDomain'
