@@ -130,7 +130,7 @@ Resources:
     Type: AWS::CloudFront::CachePolicy
     Properties:
       CachePolicyConfig:
-        Name: LambdaCache
+        Name: !Sub "LambdaCache-${ServerlessRestApi}"
         MinTTL: 0
         MaxTTL: !Ref CacheTTL
         DefaultTTL: !Ref CacheTTL
