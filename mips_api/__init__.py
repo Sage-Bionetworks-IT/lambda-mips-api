@@ -281,4 +281,5 @@ def lambda_handler(event, context):
         return _build_return(400, {"error": f"Invalid event: No path found: {event}"})
 
     except Exception as exc:
+        LOG.exception(exc)
         return _build_return(500, {"error": str(exc)})
