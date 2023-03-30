@@ -88,12 +88,19 @@ mock_chart = {
 }
 
 # expected internal dictionary
-expected_mips_dict = {
+expected_mips_dict_raw = {
     '12345600': 'Other Program A',
     '12345601': 'Other Program B',
     '54321': 'Inactive',
     '99030000': 'Platform Infrastructure',
     '99990000': 'Unfunded',
+}
+
+expected_mips_dict_processed = {
+    '000000': 'No Program',
+    '000001': 'Other',
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
 }
 
 # expected tag list
@@ -249,7 +256,7 @@ def test_chart(requests_mock):
     mips_dict = mips_api.collect_chart(org_name, mock_secrets)
 
     # assert expected data
-    assert mips_dict == expected_mips_dict
+    assert mips_dict == expected_mips_dict_raw
 
     # assert all mock urls were called
     assert login_mock.call_count == 1
@@ -277,11 +284,15 @@ def test_parse_extra():
     assert parsed_extra_codes == expected_extra_codes
 
 
+def test_process_chart():
+    processed_chart = mips_api.process_chart(expected_mips_dict_raw, expected_omit_codes, expected_extra_codes)
+    assert processed_chart == expected_mips_dict_processed
+
 def test_tags():
     '''Testing building tag list from collected chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(None, expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    tag_list = mips_api.list_tags(None, expected_mips_dict_processed)
     assert tag_list == expected_tag_list
 
 
@@ -289,7 +300,7 @@ def test_tags_limit():
     '''Testing building tag list from collected chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(mock_limit_param, expected_mips_dict, expected_omit_codes, expected_extra_codes)
+    tag_list = mips_api.list_tags(mock_limit_param, expected_mips_dict_processed)
     assert tag_list == expected_tag_limit_list
 
 
@@ -323,7 +334,7 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     # mock out collect_chart() with mock chart
     mocker.patch('mips_api.collect_chart',
                  autospec=True,
-                 return_value=expected_mips_dict)
+                 return_value=expected_mips_dict_raw)
 
     # test event
     ret = mips_api.lambda_handler(event, None)
@@ -347,7 +358,7 @@ def test_lambda_handler_invalid_path(invalid_event, mocker):
 def test_lambda_handler_accounts(accounts_event, mocker):
     '''Test chart-of-accounts event'''
 
-    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict)
+    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict_raw)
 
 
 def test_lambda_handler_tags(tags_event, mocker):
