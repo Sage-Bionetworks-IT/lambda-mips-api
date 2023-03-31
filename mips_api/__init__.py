@@ -168,6 +168,19 @@ def filter_chart(params, raw_chart, omit_list, extra_dict):
     if params and 'filter' in params:
         mips_dict = process_chart(raw_chart, omit_list, extra_dict)
 
+    # if a 'limit' query-string parameter is defined, "slice" the dictionary
+    limit = 0
+    if params and 'limit' in params:
+        try:
+            limit = int(params['limit'])
+        except TypeError as exc:
+            err_str = "QueryStringParameter 'limit' must be an Integer"
+            raise TypeError(err_str)
+    if limit > 0:
+        # https://stackoverflow.com/a/66535220/1742875
+        _mips_dict = dict(list(mips_dict.items())[:limit])
+        return _mips_dict
+
     return mips_dict
 
 def list_tags(params, chart_dict):

@@ -24,9 +24,12 @@ In the event of a cache hit, Cloudfront will return the cached value without tri
 
 ### Query String Parameters
 
+A couple query-string parameters are available to configure response output.
+
 | Query String Parameter | Valid Routes | Description |
 | --- | --- | --- |
-| limit | /tags | Return no more than `limit` valid tags. Must be an integer greater than zero. |
+| filter | /accounts | If defined, process the chart of accounts based on `CodesToOmit` and `CodesToAdd`. |
+| limit | /accounts /tags | Return no more than `limit` valid tags. Must be an integer greater than zero. |
 
 ### Required Secure Parameters
 
@@ -71,12 +74,24 @@ The CloudFormation template also outputs the origin URL behind the CloudFront di
 #### /accounts
 
 The `/accounts` endpoint will return a json string representing a dictionary mapping numeric codes to their names.
-This dictionary represents the raw chart of accounts provided by the upstream API, without any filtering or
-deduplication of codes.
+By default, this dictionary represents the raw chart of accounts provided by the upstream API, without any filtering or
+deduplication of codes; but this can be toggled by defining a 'filter' query-string parameter.
 
 E.g.:
 ```json
-{"000000": "No Program", "990300": "Platform Infrastructure"}
+{
+  "12345600": "Duplicate 1",
+  "12345699": "Duplicate 2",
+  "54321": "Inactive",
+  "99030000": "Platform Infrastructure"
+}
+```
+```json
+{
+  "000000": "No Program",
+  "123456": "Duplicate 1",
+  "990300": "Platform Infrastructure"
+}
 ```
 
 #### /tags
@@ -87,7 +102,11 @@ Values are only generated for currently-active program codes.
 
 E.g.:
 ```json
-["No Program / 000000", "Platform Infrastructure / 990300"]
+[
+  "No Program / 000000",
+  "Duplicate 1 / 123456",
+  "Platform Infrastructure / 990300"
+]
 ```
 
 ### CloudFront Cache
