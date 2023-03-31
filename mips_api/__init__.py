@@ -157,6 +157,18 @@ def process_chart(chart_dict, omit_list, extra_dict):
 
     return out_chart
 
+def _param_filter_bool(params):
+    return ('filter' in params)
+
+def _param_limit_int(params):
+    if 'limit' in params:
+        try:
+            return int(params['limit'])
+        except TypeError as exc:
+            err_str = "QueryStringParameter 'limit' must be an Integer"
+            raise TypeError(err_str) from exc
+    return 0
+
 def filter_chart(params, raw_chart, omit_list, extra_dict):
     '''
     Optionally process the chart of accounts based on a query-string parameter."
@@ -165,17 +177,11 @@ def filter_chart(params, raw_chart, omit_list, extra_dict):
     mips_dict = raw_chart
 
     # if a 'filter' query-string parameter is defined, process the chart
-    if params and 'filter' in params:
+    if _param_filter_bool(params):
         mips_dict = process_chart(raw_chart, omit_list, extra_dict)
 
     # if a 'limit' query-string parameter is defined, "slice" the dictionary
-    limit = 0
-    if params and 'limit' in params:
-        try:
-            limit = int(params['limit'])
-        except TypeError as exc:
-            err_str = "QueryStringParameter 'limit' must be an Integer"
-            raise TypeError(err_str)
+    limit = _param_limit_int(params)
     if limit > 0:
         # https://stackoverflow.com/a/66535220/1742875
         _mips_dict = dict(list(mips_dict.items())[:limit])
@@ -200,15 +206,7 @@ def list_tags(params, chart_dict):
         tag = f"{name} / {code}"
         tags.append(tag)
 
-    limit = 0
-    if params:
-        if 'limit' in params:
-            try:
-                limit = int(params['limit'])
-            except TypeError as exc:
-                err_str = "QueryStringParameter 'limit' must be an Integer"
-                raise TypeError(err_str)
-
+    limit = _param_limit_int(params)
     if limit > 0:
         LOG.info(f"limiting output to {limit} values")
         return tags[0:limit]

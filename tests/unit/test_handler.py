@@ -292,7 +292,7 @@ def test_tags():
     '''Testing building tag list from collected chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(None, expected_mips_dict_processed)
+    tag_list = mips_api.list_tags({}, expected_mips_dict_processed)
     assert tag_list == expected_tag_list
 
 
