@@ -158,7 +158,7 @@ def process_chart(chart_dict, omit_list, extra_dict):
     return out_chart
 
 def _param_filter_bool(params):
-    return ('filter' in params)
+    return ('filter' in params) and params['filter']
 
 def _param_limit_int(params):
     if 'limit' in params:

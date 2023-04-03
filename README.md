@@ -22,15 +22,6 @@ and return a JSON mapping of the data to be stored in Cloudfront for a default o
 
 In the event of a cache hit, Cloudfront will return the cached value without triggering an API gateway event.
 
-### Query String Parameters
-
-A couple query-string parameters are available to configure response output.
-
-| Query String Parameter | Valid Routes | Description |
-| --- | --- | --- |
-| filter | /accounts | If defined, process the chart of accounts based on `CodesToOmit` and `CodesToAdd`. |
-| limit | /accounts /tags | Return no more than `limit` valid tags. Must be an integer greater than zero. |
-
 ### Required Secure Parameters
 
 User credentials for logging in to the finance system are stored as secure parameters with a configurable prefix.
@@ -57,6 +48,23 @@ The following template parameters are set as environment variables in the lambda
 | CodesToOmit | CodesToOmit | List of numeric codes to treat as inactive. |
 | CodesToAdd | CodesToAdd | List of "code:name" strings to add to the active list. |
 
+### Query String Parameters
+
+A couple query-string parameters are available to configure response output.
+
+A `filter` parameter is available for the `/accounts` endpoint to optionally
+process the chart of accounts based on the values of `CodesToOmit` and `CodesToAdd`.
+Defining any non-false value for this parameter will enable it.
+
+A `limit` parameter is available for either endpoint to restrict the number of
+items returned. This value must be a positive integer, a value of zero
+disables the parameter.
+
+| Query String Parameter | Valid Routes | Default Value |
+| --- | --- | --- |
+| filter | /accounts | Undefined (disabled) |
+| limit | /accounts /tags | `0` (disabled) |
+
 ### Triggering
 
 The CloudFormation template will output all available endpoint URLs for triggering the lambda, e.g.:
@@ -78,6 +86,8 @@ By default, this dictionary represents the raw chart of accounts provided by the
 deduplication of codes; but this can be toggled by defining a 'filter' query-string parameter.
 
 E.g.:
+
+`/accounts`
 ```json
 {
   "12345600": "Duplicate 1",
@@ -86,6 +96,8 @@ E.g.:
   "99030000": "Platform Infrastructure"
 }
 ```
+
+`/accounts?filter`
 ```json
 {
   "000000": "No Program",
