@@ -96,11 +96,23 @@ expected_mips_dict_raw = {
     '99990000': 'Unfunded',
 }
 
+expected_mips_dict_raw_limit_3 = {
+    '12345600': 'Other Program A',
+    '12345601': 'Other Program B',
+    '54321': 'Inactive',
+}
+
 expected_mips_dict_processed = {
     '000000': 'No Program',
     '000001': 'Other',
     '123456': 'Other Program A',
     '990300': 'Platform Infrastructure',
+}
+
+expected_mips_dict_processed_limit_3 = {
+    '000000': 'No Program',
+    '000001': 'Other',
+    '123456': 'Other Program A',
 }
 
 # expected tag list
@@ -111,8 +123,9 @@ expected_tag_list = [
     'Platform Infrastructure / 990300',
 ]
 
-# mock query-string parameter
+# mock query-string parameters
 mock_limit_param = { 'limit': 3 }
+mock_filter_param = { 'filter': 'true' }
 
 # expected tag list with limit
 expected_tag_limit_list = expected_tag_list[0:3]
@@ -287,6 +300,64 @@ def test_parse_extra():
 def test_process_chart():
     processed_chart = mips_api.process_chart(expected_mips_dict_raw, expected_omit_codes, expected_extra_codes)
     assert processed_chart == expected_mips_dict_processed
+
+
+@pytest.mark.parametrize(
+        "params,expected_bool",
+        [
+            ({}, False),
+            ({'foo': 'bar'}, False),
+            ({'filter': 'false'}, False),
+            ({'filter': 'OFF'}, False),
+            ({'filter': 'True'}, True),
+            ({'filter': 'oN'}, True),
+            ({'filter': ''}, True),
+        ]
+    )
+def test_param_filter_bool(params, expected_bool):
+    found_filter_bool = mips_api._param_filter_bool(params)
+    assert found_filter_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+        "params,expected_int",
+        [
+            ({}, 0),
+            ({'foo': 'bar'}, 0),
+            ({'limit': '5'}, 5),
+        ]
+    )
+def test_param_limit_int(params, expected_int):
+    found_limit_int = mips_api._param_limit_int(params)
+    assert found_limit_int == expected_int
+
+
+@pytest.mark.parametrize(
+        "params",
+        [
+            {'limit': ''},
+            {'limit': 'five'},
+        ]
+    )
+def test_param_limit_int_err(params):
+    with pytest.raises(ValueError):
+        found_limit_int = mips_api._param_limit_int(params)
+
+
+@pytest.mark.parametrize(
+        "params,expected_dict",
+        [
+            ({}, expected_mips_dict_raw),
+            ({'foo': 'bar'}, expected_mips_dict_raw),
+            ({'limit': '3'}, expected_mips_dict_raw_limit_3),
+            ({'filter': 'true'}, expected_mips_dict_processed),
+            ({'filter': '', 'limit': '3'}, expected_mips_dict_processed_limit_3),
+        ]
+    )
+def test_filter_chart(params, expected_dict):
+    processed_chart = mips_api.filter_chart(params, expected_mips_dict_raw, expected_omit_codes, expected_extra_codes)
+    assert processed_chart == expected_dict
+
 
 def test_tags():
     '''Testing building tag list from collected chart of accounts'''

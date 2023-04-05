@@ -158,15 +158,18 @@ def process_chart(chart_dict, omit_list, extra_dict):
     return out_chart
 
 def _param_filter_bool(params):
-    return ('filter' in params) and params['filter']
+    if 'filter' in params:
+        if params['filter'].lower() not in [ 'false', 'no', 'off' ]:
+            return True
+    return False
 
 def _param_limit_int(params):
     if 'limit' in params:
         try:
             return int(params['limit'])
-        except TypeError as exc:
+        except ValueError as exc:
             err_str = "QueryStringParameter 'limit' must be an Integer"
-            raise TypeError(err_str) from exc
+            raise ValueError(err_str) from exc
     return 0
 
 def filter_chart(params, raw_chart, omit_list, extra_dict):
