@@ -96,7 +96,7 @@ expected_mips_dict_raw = {
     '99990000': 'Unfunded',
 }
 
-expected_mips_dict_raw_limit_3 = {
+expected_mips_dict_raw_limit = {
     '12345600': 'Other Program A',
     '12345601': 'Other Program B',
     '54321': 'Inactive',
@@ -109,7 +109,7 @@ expected_mips_dict_processed = {
     '990300': 'Platform Infrastructure',
 }
 
-expected_mips_dict_processed_limit_3 = {
+expected_mips_dict_processed_limit = {
     '000000': 'No Program',
     '000001': 'Other',
     '123456': 'Other Program A',
@@ -123,9 +123,18 @@ expected_tag_list = [
     'Platform Infrastructure / 990300',
 ]
 
+# expected tag list
+expected_tag_list_limit = [
+    'No Program / 000000',
+    'Other / 000001',
+    'Other Program A / 123456',
+]
+
 # mock query-string parameters
-mock_limit_param = { 'limit': 3 }
+mock_foo_param = { 'foo': 'bar' }
+mock_limit_param = { 'limit': '3' }
 mock_filter_param = { 'filter': 'true' }
+mock_filter_and_limit_param = { 'filter': '', 'limit': '3' }
 
 # expected tag list with limit
 expected_tag_limit_list = expected_tag_list[0:3]
@@ -348,10 +357,10 @@ def test_param_limit_int_err(params):
         "params,expected_dict",
         [
             ({}, expected_mips_dict_raw),
-            ({'foo': 'bar'}, expected_mips_dict_raw),
-            ({'limit': '3'}, expected_mips_dict_raw_limit_3),
-            ({'filter': 'true'}, expected_mips_dict_processed),
-            ({'filter': '', 'limit': '3'}, expected_mips_dict_processed_limit_3),
+            (mock_foo_param, expected_mips_dict_raw),
+            (mock_limit_param, expected_mips_dict_raw_limit),
+            (mock_filter_param, expected_mips_dict_processed),
+            (mock_filter_and_limit_param, expected_mips_dict_processed_limit),
         ]
     )
 def test_filter_chart(params, expected_dict):
@@ -359,20 +368,20 @@ def test_filter_chart(params, expected_dict):
     assert processed_chart == expected_dict
 
 
-def test_tags():
+@pytest.mark.parametrize(
+        "params,expected_list",
+        [
+            ({}, expected_tag_list),
+            (mock_foo_param, expected_tag_list),
+            (mock_limit_param, expected_tag_list_limit),
+        ]
+    )
+def test_tags(params, expected_list):
     '''Testing building tag list from collected chart of accounts'''
 
     # assert expected tag list
-    tag_list = mips_api.list_tags({}, expected_mips_dict_processed)
-    assert tag_list == expected_tag_list
-
-
-def test_tags_limit():
-    '''Testing building tag list from collected chart of accounts'''
-
-    # assert expected tag list
-    tag_list = mips_api.list_tags(mock_limit_param, expected_mips_dict_processed)
-    assert tag_list == expected_tag_limit_list
+    tag_list = mips_api.list_tags(params, expected_mips_dict_processed)
+    assert tag_list == expected_list
 
 
 def test_lambda_handler_no_env(invalid_event):
