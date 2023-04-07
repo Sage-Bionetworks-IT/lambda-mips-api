@@ -133,8 +133,8 @@ expected_tag_list_limit = [
 # mock query-string parameters
 mock_foo_param = { 'foo': 'bar' }
 mock_limit_param = { 'limit': '3' }
-mock_filter_param = { 'filter': 'true' }
-mock_filter_and_limit_param = { 'filter': '', 'limit': '3' }
+mock_filter_param = { 'enable_code_filter': 'true' }
+mock_filter_and_limit_param = { 'enable_code_filter': '', 'limit': '3' }
 
 # expected tag list with limit
 expected_tag_limit_list = expected_tag_list[0:3]
@@ -316,11 +316,11 @@ def test_process_chart():
         [
             ({}, False),
             ({'foo': 'bar'}, False),
-            ({'filter': 'false'}, False),
-            ({'filter': 'OFF'}, False),
-            ({'filter': 'True'}, True),
-            ({'filter': 'oN'}, True),
-            ({'filter': ''}, True),
+            ({'enable_code_filter': 'false'}, False),
+            ({'enable_code_filter': 'OFF'}, False),
+            ({'enable_code_filter': 'True'}, True),
+            ({'enable_code_filter': 'oN'}, True),
+            ({'enable_code_filter': ''}, True),
         ]
     )
 def test_param_filter_bool(params, expected_bool):

@@ -158,8 +158,8 @@ def process_chart(chart_dict, omit_list, extra_dict):
     return out_chart
 
 def _param_filter_bool(params):
-    if 'filter' in params:
-        if params['filter'].lower() not in [ 'false', 'no', 'off' ]:
+    if 'enable_code_filter' in params:
+        if params['enable_code_filter'].lower() not in [ 'false', 'no', 'off' ]:
             return True
     return False
 
@@ -179,7 +179,7 @@ def filter_chart(params, raw_chart, omit_list, extra_dict):
 
     mips_dict = raw_chart
 
-    # if a 'filter' query-string parameter is defined, process the chart
+    # if an 'enable_code_filter' query-string parameter is defined, process the chart
     if _param_filter_bool(params):
         mips_dict = process_chart(raw_chart, omit_list, extra_dict)
 

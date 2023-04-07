@@ -52,7 +52,7 @@ The following template parameters are set as environment variables in the lambda
 
 A couple query-string parameters are available to configure response output.
 
-A `filter` parameter is available for the `/accounts` endpoint to optionally
+An `enable_code_filter` parameter is available for the `/accounts` endpoint to optionally
 process the chart of accounts based on the values of `CodesToOmit` and `CodesToAdd`.
 Defining any non-false value for this parameter will enable it.
 
@@ -62,7 +62,7 @@ disables the parameter.
 
 | Query String Parameter | Valid Routes | Default Value |
 | --- | --- | --- |
-| filter | /accounts | Undefined (disabled) |
+| enable\_code\_filter | /accounts | Undefined (disabled) |
 | limit | /accounts /tags | `0` (disabled) |
 
 ### Triggering
@@ -83,7 +83,7 @@ The CloudFormation template also outputs the origin URL behind the CloudFront di
 
 The `/accounts` endpoint will return a json string representing a dictionary mapping numeric codes to their names.
 By default, this dictionary represents the raw chart of accounts provided by the upstream API, without any filtering or
-deduplication of codes; but this can be toggled by defining a 'filter' query-string parameter.
+deduplication of codes; but this can be toggled by defining an 'enable\_code\_filter' query-string parameter.
 
 E.g.:
 
@@ -97,7 +97,7 @@ E.g.:
 }
 ```
 
-`/accounts?filter`
+`/accounts?enable_code_filter`
 ```json
 {
   "000000": "No Program",
