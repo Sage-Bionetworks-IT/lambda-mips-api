@@ -315,6 +315,7 @@ def test_process_chart():
         "params,expected_bool",
         [
             ({}, False),
+            (None, False),
             ({'foo': 'bar'}, False),
             ({'enable_code_filter': 'false'}, False),
             ({'enable_code_filter': 'OFF'}, False),
@@ -332,6 +333,7 @@ def test_param_filter_bool(params, expected_bool):
         "params,expected_int",
         [
             ({}, 0),
+            (None, 0),
             ({'foo': 'bar'}, 0),
             ({'limit': '5'}, 5),
         ]
