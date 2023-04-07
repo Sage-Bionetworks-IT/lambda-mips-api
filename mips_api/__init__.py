@@ -125,7 +125,74 @@ def collect_chart(org_name, secrets):
     return mips_dict
 
 
-def list_tags(params, chart_dict, omit_list, extra_dict):
+def process_chart(chart_dict, omit_list, extra_dict):
+    '''
+    Process chart of accounts to remove unneeded programs,
+    and inject some extra (meta) programs.
+
+    5-digit codes are inactive and should be ignored.
+    8-digit codes are active, but only the first 6 digits are significant,
+    i.e. 12345601 and 12345602 should be deduplicated as 123456.
+    '''
+
+    # deduplicate on shortened numeric codes
+    # pre-populate with codes to omit to short-circuit their processing
+    found_codes = []
+    found_codes.extend(omit_list)
+
+    # output object
+    out_chart = {}
+
+    # inject our extra programs at the beginning
+    for code, name in extra_dict.items():
+        out_chart[code] = name
+
+    # add active short codes
+    for code, name in chart_dict.items():
+        if len(code) > 5: # only include active codes
+            short = code[:6]  # ignore the last two digits on active codes
+            if short not in found_codes:
+                out_chart[short] = name
+                found_codes.append(short)
+
+    return out_chart
+
+def _param_filter_bool(params):
+    if 'enable_code_filter' in params:
+        if params['enable_code_filter'].lower() not in [ 'false', 'no', 'off' ]:
+            return True
+    return False
+
+def _param_limit_int(params):
+    if 'limit' in params:
+        try:
+            return int(params['limit'])
+        except ValueError as exc:
+            err_str = "QueryStringParameter 'limit' must be an Integer"
+            raise ValueError(err_str) from exc
+    return 0
+
+def filter_chart(params, raw_chart, omit_list, extra_dict):
+    '''
+    Optionally process the chart of accounts based on a query-string parameter."
+    '''
+
+    mips_dict = raw_chart
+
+    # if an 'enable_code_filter' query-string parameter is defined, process the chart
+    if _param_filter_bool(params):
+        mips_dict = process_chart(raw_chart, omit_list, extra_dict)
+
+    # if a 'limit' query-string parameter is defined, "slice" the dictionary
+    limit = _param_limit_int(params)
+    if limit > 0:
+        # https://stackoverflow.com/a/66535220/1742875
+        _mips_dict = dict(list(mips_dict.items())[:limit])
+        return _mips_dict
+
+    return mips_dict
+
+def list_tags(params, chart_dict):
     '''
     Generate a list of valid AWS tags. Only active codes are listed.
 
@@ -136,32 +203,13 @@ def list_tags(params, chart_dict, omit_list, extra_dict):
     '''
 
     tags = []
-    found_codes = []
 
-    # inject extra cost centers
-    for code, name in extra_dict.items():
-        tags.append(f"{name} / {code}")
-
-    # inactive codes have 5 digits, active codes have 8;
-    # and only the first 6 digits of active codes are significant
+    # build tags from chart of accounts
     for code, name in chart_dict.items():
-        if len(code) > 5: # only include active codes
-            short = code[:6]  # ignore the last two digits on active codes
-            if short not in omit_list:
-                if short not in found_codes:
-                    tag = f"{name} / {short}"
-                    tags.append(tag)
-                    found_codes.append(short)
+        tag = f"{name} / {code}"
+        tags.append(tag)
 
-    limit = 0
-    if params:
-        if 'limit' in params:
-            try:
-                limit = int(params['limit'])
-            except TypeError as exc:
-                err_str = "QueryStringParameter 'limit' must be an Integer"
-                raise TypeError(err_str)
-
+    limit = _param_limit_int(params)
     if limit > 0:
         LOG.info(f"limiting output to {limit} values")
         return tags[0:limit]
@@ -217,7 +265,7 @@ def lambda_handler(event, context):
         ssm_secrets = collect_secrets(ssm_path)
 
         # get chart of accounts from mips
-        mips_chart = collect_chart(mips_org, ssm_secrets)
+        raw_chart = collect_chart(mips_org, ssm_secrets)
 
         # collect query-string parameters
         params = {}
@@ -229,14 +277,14 @@ def lambda_handler(event, context):
             event_path = event['path']
 
             if event_path == api_routes['ApiChartOfAccounts']:
-                # return chart of accounts
+                # return chart of accounts, optionally processed
+                mips_chart = filter_chart(params, raw_chart, omit_codes_list, extra_codes_dict)
                 return _build_return(200, mips_chart)
 
             elif event_path == api_routes['ApiValidTags']:
-                try:
-                    valid_tags = list_tags(params, mips_chart, omit_codes_list, extra_codes_dict)
-                except Exception as exc:
-                    return _build_return(500, {"error": str(exc)})
+                # always process the chart for the tags list
+                mips_chart = process_chart(raw_chart, omit_codes_list, extra_codes_dict)
+                valid_tags = list_tags(params, mips_chart)
 
                 # return valid tags
                 return _build_return(200, valid_tags)
@@ -247,4 +295,5 @@ def lambda_handler(event, context):
         return _build_return(400, {"error": f"Invalid event: No path found: {event}"})
 
     except Exception as exc:
+        LOG.exception(exc)
         return _build_return(500, {"error": str(exc)})

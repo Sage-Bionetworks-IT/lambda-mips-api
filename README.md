@@ -22,12 +22,6 @@ and return a JSON mapping of the data to be stored in Cloudfront for a default o
 
 In the event of a cache hit, Cloudfront will return the cached value without triggering an API gateway event.
 
-### Query String Parameters
-
-| Query String Parameter | Valid Routes | Description |
-| --- | --- | --- |
-| limit | /tags | Return no more than `limit` valid tags. Must be an integer greater than zero. |
-
 ### Required Secure Parameters
 
 User credentials for logging in to the finance system are stored as secure parameters with a configurable prefix.
@@ -54,6 +48,23 @@ The following template parameters are set as environment variables in the lambda
 | CodesToOmit | CodesToOmit | List of numeric codes to treat as inactive. |
 | CodesToAdd | CodesToAdd | List of "code:name" strings to add to the active list. |
 
+### Query String Parameters
+
+A couple query-string parameters are available to configure response output.
+
+An `enable_code_filter` parameter is available for the `/accounts` endpoint to optionally
+process the chart of accounts based on the values of `CodesToOmit` and `CodesToAdd`.
+Defining any non-false value for this parameter will enable it.
+
+A `limit` parameter is available for either endpoint to restrict the number of
+items returned. This value must be a positive integer, a value of zero
+disables the parameter.
+
+| Query String Parameter | Valid Routes | Default Value |
+| --- | --- | --- |
+| enable\_code\_filter | /accounts | Undefined (disabled) |
+| limit | /accounts /tags | `0` (disabled) |
+
 ### Triggering
 
 The CloudFormation template will output all available endpoint URLs for triggering the lambda, e.g.:
@@ -71,12 +82,28 @@ The CloudFormation template also outputs the origin URL behind the CloudFront di
 #### /accounts
 
 The `/accounts` endpoint will return a json string representing a dictionary mapping numeric codes to their names.
-This dictionary represents the raw chart of accounts provided by the upstream API, without any filtering or
-deduplication of codes.
+By default, this dictionary represents the raw chart of accounts provided by the upstream API, without any filtering or
+deduplication of codes; but this can be toggled by defining an 'enable\_code\_filter' query-string parameter.
 
 E.g.:
+
+`/accounts`
 ```json
-{"000000": "No Program", "990300": "Platform Infrastructure"}
+{
+  "12345600": "Duplicate 1",
+  "12345699": "Duplicate 2",
+  "54321": "Inactive",
+  "99030000": "Platform Infrastructure"
+}
+```
+
+`/accounts?enable_code_filter`
+```json
+{
+  "000000": "No Program",
+  "123456": "Duplicate 1",
+  "990300": "Platform Infrastructure"
+}
 ```
 
 #### /tags
@@ -87,7 +114,11 @@ Values are only generated for currently-active program codes.
 
 E.g.:
 ```json
-["No Program / 000000", "Platform Infrastructure / 990300"]
+[
+  "No Program / 000000",
+  "Duplicate 1 / 123456",
+  "Platform Infrastructure / 990300"
+]
 ```
 
 ### CloudFront Cache
