@@ -158,13 +158,13 @@ def process_chart(chart_dict, omit_list, extra_dict):
     return out_chart
 
 def _param_filter_bool(params):
-    if 'enable_code_filter' in params:
+    if params and 'enable_code_filter' in params:
         if params['enable_code_filter'].lower() not in [ 'false', 'no', 'off' ]:
             return True
     return False
 
 def _param_limit_int(params):
-    if 'limit' in params:
+    if params and 'limit' in params:
         try:
             return int(params['limit'])
         except ValueError as exc:
