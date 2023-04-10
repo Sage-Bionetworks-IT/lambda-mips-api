@@ -27,14 +27,19 @@ def _get_os_var(varnam):
 
 
 def _parse_omit_codes(omit_codes):
-    return omit_codes.split(',')
+    data = []
+    if omit_codes:
+        data = omit_codes.split(',')
+    return data
 
 
 def _parse_extra_codes(extra_codes):
     data = {}
-    for _kv_pair in extra_codes.split(','):
-        k, v = _kv_pair.split(':', 1)
-        data[k] = v
+    if extra_codes:
+        for _kv_pair in extra_codes.split(','):
+            if _kv_pair and ':' in _kv_pair:
+                k, v = _kv_pair.split(':', 1)
+                data[k] = v
     return data
 
 def collect_secrets(ssm_path):

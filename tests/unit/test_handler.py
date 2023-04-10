@@ -296,14 +296,36 @@ def test_chart(requests_mock):
     assert logout_mock.call_count == 2
 
 
-def test_parse_omit():
-    parsed_omit_codes = mips_api._parse_omit_codes(omit_codes)
-    assert parsed_omit_codes == expected_omit_codes
+@pytest.mark.parametrize(
+        "code_str,code_list",
+        [
+            (None, []),
+            ('', []),
+            ('1', ['1']),
+            ('1,2', ['1', '2']),
+            (omit_codes, expected_omit_codes),
+        ]
+    )
+def test_parse_omit(code_str, code_list):
+    parsed_omit_codes = mips_api._parse_omit_codes(code_str)
+    assert parsed_omit_codes == code_list
 
 
-def test_parse_extra():
-    parsed_extra_codes = mips_api._parse_extra_codes(extra_codes)
-    assert parsed_extra_codes == expected_extra_codes
+@pytest.mark.parametrize(
+        "code_str,code_dict",
+        [
+            (None, {}),
+            ('', {}),
+            ('123', {}),
+            ('123,abc', {}),
+            ('123:abc', {'123': 'abc'}),
+            ('123:abc:def', {'123': 'abc:def'}),
+            (extra_codes, expected_extra_codes),
+        ]
+    )
+def test_parse_extra(code_str, code_dict):
+    parsed_extra_codes = mips_api._parse_extra_codes(code_str)
+    assert parsed_extra_codes == code_dict
 
 
 def test_process_chart():
