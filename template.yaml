@@ -42,7 +42,7 @@ Parameters:
   CodesToAdd:
     Type: String
     Description: Comma-delimited list of code:name pairs to add to the active list.
-    Default: '000000:No Program,000001:Other'
+    Default: '000000:No Program'
 
 
 Conditions:
