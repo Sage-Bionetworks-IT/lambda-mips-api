@@ -43,6 +43,14 @@ Parameters:
     Type: String
     Description: Comma-delimited list of code:name pairs to add to the active list.
     Default: '000000:No Program'
+  NoProgramCode:
+    Type: String
+    Description: Numeric code for the "No Program" meta-program
+    Default: '000000'
+  OtherCode:
+    Type: String
+    Description: Numeric code for the "Other" meta-program
+    Default: '000001'
 
 
 Conditions:
@@ -66,6 +74,8 @@ Resources:
           SsmPath: !Ref SsmParamPrefix
           CodesToOmit: !Ref CodesToOmit
           CodesToAdd: !Ref CodesToAdd
+          NoProgramCode: !Ref NoProgramCode
+          OtherCode: !Ref OtherCode
       Role: !GetAtt FunctionRole.Arn
       Events:
         ChartOfAccounts:

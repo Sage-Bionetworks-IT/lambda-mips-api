@@ -46,15 +46,21 @@ The following template parameters are set as environment variables in the lambda
 | MipsOrganization | MipsOrg | Log in to this organization in the finance system. |
 | SsmParamPrefix | SsmPath | Path prefix for required secure parameters. |
 | CodesToOmit | CodesToOmit | List of numeric codes to treat as inactive. |
-| CodesToAdd | CodesToAdd | List of "code:name" strings to add to the active list. |
+| NoProgramCode | NoProgramCode | Numeric code to use for "No Program" meta-program. |
+| OtherCode | OtherCode | Numeric code to use for "Other" meta-program. |
 
 ### Query String Parameters
 
 A couple query-string parameters are available to configure response output.
 
-An `enable_code_filter` parameter is available for the `/accounts` endpoint to optionally
-process the chart of accounts based on the values of `CodesToOmit` and `CodesToAdd`.
+An `enable_code_filter` parameter is available for the `/accounts` endpoint to
+optionally remove inactive codes and `CodesToOmit`, as well as inject a
+"No Program" code with a value from the `NoProgramCode` parameter.
 Defining any non-false value for this parameter will enable it.
+
+An `enable_other_code` parameter is available for either endpoint to optionally
+include an "Other" entry in the output with a value from the `OtherCode`
+parameter. Defining any non-false value for this parameter will enable it.
 
 A `limit` parameter is available for either endpoint to restrict the number of
 items returned. This value must be a positive integer, a value of zero
@@ -63,6 +69,7 @@ disables the parameter.
 | Query String Parameter | Valid Routes | Default Value |
 | --- | --- | --- |
 | enable\_code\_filter | /accounts | Undefined (disabled) |
+| enable\_other\_code | /accounts /tags | Undefined (disabled) |
 | limit | /accounts /tags | `0` (disabled) |
 
 ### Triggering
