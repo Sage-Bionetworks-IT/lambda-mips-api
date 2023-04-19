@@ -48,6 +48,10 @@ def _param_other_bool(params):
     return _param_bool(params, 'enable_other_code')
 
 
+def _param_no_program_bool(params):
+    return not _param_bool(params, 'disable_no_program_code')
+
+
 def _param_limit_int(params):
     if params and 'limit' in params:
         try:
@@ -164,10 +168,11 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
     # output object
     out_chart = {}
 
-    # always inject "no program" code
-    out_chart[no_program] = "No Program"
+    # inject "no program" code
+    if _param_no_program_bool(params):
+        out_chart[no_program] = "No Program"
 
-    # optionally inject "other" code
+    # inject "other" code
     if _param_other_bool(params):
         out_chart[other] = "Other"
 

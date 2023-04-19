@@ -54,13 +54,17 @@ The following template parameters are set as environment variables in the lambda
 A couple query-string parameters are available to configure response output.
 
 An `enable_code_filter` parameter is available for the `/accounts` endpoint to
-optionally remove inactive codes and `CodesToOmit`, as well as inject a
-"No Program" code with a value from the `NoProgramCode` parameter.
+optionally remove inactive codes and `CodesToOmit`.
 Defining any non-false value for this parameter will enable it.
 
 An `enable_other_code` parameter is available for either endpoint to optionally
 include an "Other" entry in the output with a value from the `OtherCode`
 parameter. Defining any non-false value for this parameter will enable it.
+
+A `disable_no_program_code` parameter is available for either endpoint to optionally
+exclude a "No Program" entry from the output, otherwise it will be injected
+with a value from the `NoProgramCode` parameter.
+Defining any non-false value for this parameter will enable it.
 
 A `limit` parameter is available for either endpoint to restrict the number of
 items returned. This value must be a positive integer, a value of zero
@@ -70,6 +74,7 @@ disables the parameter.
 | --- | --- | --- |
 | enable\_code\_filter | /accounts | Undefined (disabled) |
 | enable\_other\_code | /accounts /tags | Undefined (disabled) |
+| disable\_no\_program\_code | /accounts /tags | Undefined (disabled) |
 | limit | /accounts /tags | `0` (disabled) |
 
 ### Triggering

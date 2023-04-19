@@ -110,6 +110,17 @@ expected_mips_dict_processed_other = {
     '990300': 'Platform Infrastructure',
 }
 
+expected_mips_dict_processed_no = {
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
+}
+
+expected_mips_dict_processed_other_no = {
+    '000001': 'Other',
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
+}
+
 expected_mips_dict_processed_limit = {
     '000000': 'No Program',
     '123456': 'Other Program A',
@@ -133,7 +144,7 @@ mock_foo_param = { 'foo': 'bar' }
 mock_limit_param = { 'limit': '2' }
 mock_other_param = { 'enable_other_code': 'true' }
 mock_filter_param = { 'enable_code_filter': 'true' }
-mock_filter_and_limit_param = { 'enable_code_filter': '', 'limit': '2' }
+mock_no_program_param = { 'disable_no_program_code': 'true' }
 
 
 def apigw_event(path, qsp={"foo": "bar"}):
@@ -313,6 +324,8 @@ def test_parse_omit(code_str, code_list):
             ({}, expected_mips_dict_processed),
             (mock_foo_param, expected_mips_dict_processed),
             (mock_other_param, expected_mips_dict_processed_other),
+            (mock_no_program_param, expected_mips_dict_processed_no),
+            (mock_other_param | mock_no_program_param, expected_mips_dict_processed_other_no),
         ]
     )
 def test_process_chart(params, expected_dict):
@@ -326,15 +339,15 @@ def test_process_chart(params, expected_dict):
             ({}, False),
             (None, False),
             ({'foo': 'bar'}, False),
-            ({'enable_code_filter': 'false'}, False),
-            ({'enable_code_filter': 'OFF'}, False),
-            ({'enable_code_filter': 'True'}, True),
-            ({'enable_code_filter': 'oN'}, True),
-            ({'enable_code_filter': ''}, True),
+            ({'test': 'false'}, False),
+            ({'test': 'OFF'}, False),
+            ({'test': 'True'}, True),
+            ({'test': 'oN'}, True),
+            ({'test': ''}, True),
         ]
     )
-def test_param_filter_bool(params, expected_bool):
-    found_filter_bool = mips_api._param_filter_bool(params)
+def test_param_bool(params, expected_bool):
+    found_filter_bool = mips_api._param_bool(params, 'test')
     assert found_filter_bool == expected_bool
 
 
@@ -371,7 +384,7 @@ def test_param_limit_int_err(params):
             (mock_foo_param, expected_mips_dict_raw),
             (mock_limit_param, expected_mips_dict_raw_limit),
             (mock_filter_param, expected_mips_dict_processed),
-            (mock_filter_and_limit_param, expected_mips_dict_processed_limit),
+            (mock_limit_param | mock_filter_param, expected_mips_dict_processed_limit),
         ]
     )
 def test_filter_chart(params, expected_dict):
