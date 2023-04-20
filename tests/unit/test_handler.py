@@ -16,7 +16,8 @@ api_tags = '/test/tags'
 org_name = 'testOrg'
 ssm_path = 'secret/path'
 omit_codes = '999900,999800'
-extra_codes = '000000:No Program,000001:Other'
+other_code = '000001'
+no_program_code = '000000'
 
 # neither api_accounts nor api_tags
 api_invalid = '/test/invalid'
@@ -25,11 +26,6 @@ expected_omit_codes = [
     '999900',
     '999800',
 ]
-
-expected_extra_codes = {
-    '000000': 'No Program',
-    '000001': 'Other',
-}
 
 # mock secrets (good)
 mock_secrets = {
@@ -99,11 +95,27 @@ expected_mips_dict_raw = {
 expected_mips_dict_raw_limit = {
     '12345600': 'Other Program A',
     '12345601': 'Other Program B',
-    '54321': 'Inactive',
 }
 
 expected_mips_dict_processed = {
     '000000': 'No Program',
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
+}
+
+expected_mips_dict_processed_other = {
+    '000000': 'No Program',
+    '000001': 'Other',
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
+}
+
+expected_mips_dict_processed_no = {
+    '123456': 'Other Program A',
+    '990300': 'Platform Infrastructure',
+}
+
+expected_mips_dict_processed_other_no = {
     '000001': 'Other',
     '123456': 'Other Program A',
     '990300': 'Platform Infrastructure',
@@ -111,14 +123,12 @@ expected_mips_dict_processed = {
 
 expected_mips_dict_processed_limit = {
     '000000': 'No Program',
-    '000001': 'Other',
     '123456': 'Other Program A',
 }
 
 # expected tag list
 expected_tag_list = [
     'No Program / 000000',
-    'Other / 000001',
     'Other Program A / 123456',
     'Platform Infrastructure / 990300',
 ]
@@ -126,18 +136,15 @@ expected_tag_list = [
 # expected tag list
 expected_tag_list_limit = [
     'No Program / 000000',
-    'Other / 000001',
     'Other Program A / 123456',
 ]
 
 # mock query-string parameters
 mock_foo_param = { 'foo': 'bar' }
-mock_limit_param = { 'limit': '3' }
+mock_limit_param = { 'limit': '2' }
+mock_other_param = { 'enable_other_code': 'true' }
 mock_filter_param = { 'enable_code_filter': 'true' }
-mock_filter_and_limit_param = { 'enable_code_filter': '', 'limit': '3' }
-
-# expected tag list with limit
-expected_tag_limit_list = expected_tag_list[0:3]
+mock_no_program_param = { 'disable_no_program_code': 'true' }
 
 
 def apigw_event(path, qsp={"foo": "bar"}):
@@ -312,25 +319,18 @@ def test_parse_omit(code_str, code_list):
 
 
 @pytest.mark.parametrize(
-        "code_str,code_dict",
+        "params,expected_dict",
         [
-            (None, {}),
-            ('', {}),
-            ('123', {}),
-            ('123,abc', {}),
-            ('123:abc', {'123': 'abc'}),
-            ('123:abc:def', {'123': 'abc:def'}),
-            (extra_codes, expected_extra_codes),
+            ({}, expected_mips_dict_processed),
+            (mock_foo_param, expected_mips_dict_processed),
+            (mock_other_param, expected_mips_dict_processed_other),
+            (mock_no_program_param, expected_mips_dict_processed_no),
+            (mock_other_param | mock_no_program_param, expected_mips_dict_processed_other_no),
         ]
     )
-def test_parse_extra(code_str, code_dict):
-    parsed_extra_codes = mips_api._parse_extra_codes(code_str)
-    assert parsed_extra_codes == code_dict
-
-
-def test_process_chart():
-    processed_chart = mips_api.process_chart(expected_mips_dict_raw, expected_omit_codes, expected_extra_codes)
-    assert processed_chart == expected_mips_dict_processed
+def test_process_chart(params, expected_dict):
+    processed_chart = mips_api.process_chart(params, expected_mips_dict_raw, expected_omit_codes, other_code, no_program_code)
+    assert processed_chart == expected_dict
 
 
 @pytest.mark.parametrize(
@@ -339,15 +339,15 @@ def test_process_chart():
             ({}, False),
             (None, False),
             ({'foo': 'bar'}, False),
-            ({'enable_code_filter': 'false'}, False),
-            ({'enable_code_filter': 'OFF'}, False),
-            ({'enable_code_filter': 'True'}, True),
-            ({'enable_code_filter': 'oN'}, True),
-            ({'enable_code_filter': ''}, True),
+            ({'test': 'false'}, False),
+            ({'test': 'OFF'}, False),
+            ({'test': 'True'}, True),
+            ({'test': 'oN'}, True),
+            ({'test': ''}, True),
         ]
     )
-def test_param_filter_bool(params, expected_bool):
-    found_filter_bool = mips_api._param_filter_bool(params)
+def test_param_bool(params, expected_bool):
+    found_filter_bool = mips_api._param_bool(params, 'test')
     assert found_filter_bool == expected_bool
 
 
@@ -384,11 +384,11 @@ def test_param_limit_int_err(params):
             (mock_foo_param, expected_mips_dict_raw),
             (mock_limit_param, expected_mips_dict_raw_limit),
             (mock_filter_param, expected_mips_dict_processed),
-            (mock_filter_and_limit_param, expected_mips_dict_processed_limit),
+            (mock_limit_param | mock_filter_param, expected_mips_dict_processed_limit),
         ]
     )
 def test_filter_chart(params, expected_dict):
-    processed_chart = mips_api.filter_chart(params, expected_mips_dict_raw, expected_omit_codes, expected_extra_codes)
+    processed_chart = mips_api.filter_chart(params, expected_mips_dict_raw, expected_omit_codes, other_code, no_program_code)
     assert processed_chart == expected_dict
 
 
@@ -426,7 +426,8 @@ def _test_with_env(mocker, event, code, body=None, error=None):
         'ApiChartOfAccounts': api_accounts,
         'ApiValidTags': api_tags,
         'CodesToOmit': omit_codes,
-        'CodesToAdd': extra_codes,
+        'NoProgramCode': no_program_code,
+        'OtherCode': other_code,
     }
     mocker.patch.dict(os.environ, env_vars)
 
@@ -474,4 +475,4 @@ def test_lambda_handler_tags(tags_event, mocker):
 def test_lambda_handler_tags_limit(tags_limit_event, mocker):
     '''Test tag-list event'''
 
-    _test_with_env(mocker, tags_limit_event, 200, body=expected_tag_limit_list)
+    _test_with_env(mocker, tags_limit_event, 200, body=expected_tag_list_limit)
