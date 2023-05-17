@@ -9,7 +9,7 @@ import requests
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
 
-_mips_url_login = 'https://portal.mip.com/api/v1/sso/mipadv/login'
+_mips_url_login = 'https://login.mip.com/api/v1/sso/mipadv/login'
 _mips_url_chart = 'https://api.mip.com/api/v1/maintain/chartofaccounts'
 _mips_url_logout = 'https://api.mip.com/api/security/logout'
 
