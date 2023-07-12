@@ -121,6 +121,13 @@ expected_mips_dict_processed_other_no = {
     '990300': 'Platform Infrastructure',
 }
 
+expected_mips_dict_processed_inactive = {
+    '000000': 'No Program',
+    '123456': 'Other Program A',
+    '54321': 'Inactive',
+    '990300': 'Platform Infrastructure',
+}
+
 expected_mips_dict_processed_limit = {
     '000000': 'No Program',
     '123456': 'Other Program A',
@@ -144,6 +151,7 @@ mock_foo_param = { 'foo': 'bar' }
 mock_limit_param = { 'limit': '2' }
 mock_other_param = { 'enable_other_code': 'true' }
 mock_filter_param = { 'enable_code_filter': 'true' }
+mock_inactive_param = { 'disable_inactive_filter': 'true' }
 mock_no_program_param = { 'disable_no_program_code': 'true' }
 
 
@@ -324,6 +332,7 @@ def test_parse_omit(code_str, code_list):
             ({}, expected_mips_dict_processed),
             (mock_foo_param, expected_mips_dict_processed),
             (mock_other_param, expected_mips_dict_processed_other),
+            (mock_inactive_param, expected_mips_dict_processed_inactive),
             (mock_no_program_param, expected_mips_dict_processed_no),
             (mock_other_param | mock_no_program_param, expected_mips_dict_processed_other_no),
         ]

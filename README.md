@@ -54,8 +54,13 @@ The following template parameters are set as environment variables in the lambda
 A couple query-string parameters are available to configure response output.
 
 An `enable_code_filter` parameter is available for the `/accounts` endpoint to
-optionally remove inactive codes and `CodesToOmit`.
+optionally deduplicate codes, removing inactive codes and `CodesToOmit`.
 Defining any non-false value for this parameter will enable it.
+
+A `disable_inactive_filter` parameter is available to modify the behavior of
+`enable_code_filter`. If this parameter is set to any non-false value, inactive
+codes are no longer removed. Codes are still deduplicated and `CodesToOmit` is
+respected. This parameter has no effect if `enable_code_filter` is not enabled.
 
 An `enable_other_code` parameter is available for either endpoint to optionally
 include an "Other" entry in the output with a value from the `OtherCode`
