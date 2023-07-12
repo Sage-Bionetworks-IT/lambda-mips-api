@@ -44,6 +44,10 @@ def _param_filter_bool(params):
     return _param_bool(params, 'enable_code_filter')
 
 
+def _param_inactive_bool(params):
+    return not _param_bool(params, 'disable_inactive_filter')
+
+
 def _param_other_bool(params):
     return _param_bool(params, 'enable_other_code')
 
@@ -176,9 +180,16 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
     if _param_other_bool(params):
         out_chart[other] = "Other"
 
-    # add active short codes
+    # whether or not to filter out inactive codes
+    _skip_inactive = _param_inactive_bool(params)
+
+    # add short codes
     for code, name in chart_dict.items():
-        if len(code) > 5: # only include active codes
+        code_len = 5
+        if _skip_inactive:
+            code_len = 6
+
+        if len(code) >= code_len:
             short = code[:6]  # ignore the last two digits on active codes
             if short not in found_codes:
                 out_chart[short] = name
