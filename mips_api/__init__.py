@@ -26,10 +26,10 @@ def _get_os_var(varnam):
         raise Exception(f"The environment variable '{varnam}' must be set")
 
 
-def _parse_omit_codes(omit_codes):
+def _parse_codes(codes):
     data = []
-    if omit_codes:
-        data = omit_codes.split(',')
+    if codes:
+        data = codes.split(',')
     return data
 
 
@@ -40,20 +40,16 @@ def _param_bool(params, param):
     return False
 
 
-def _param_filter_bool(params):
-    return _param_bool(params, 'enable_code_filter')
-
-
 def _param_inactive_bool(params):
-    return not _param_bool(params, 'disable_inactive_filter')
+    return not _param_bool(params, 'show_inactive_codes')
 
 
 def _param_other_bool(params):
-    return _param_bool(params, 'enable_other_code')
+    return _param_bool(params, 'show_other_code')
 
 
 def _param_no_program_bool(params):
-    return not _param_bool(params, 'disable_no_program_code')
+    return not _param_bool(params, 'hide_no_program_code')
 
 
 def _param_limit_int(params):
@@ -64,6 +60,13 @@ def _param_limit_int(params):
             err_str = "QueryStringParameter 'limit' must be an Integer"
             raise ValueError(err_str) from exc
     return 0
+
+
+def _param_priority_list(params):
+    if params and 'priority_codes' in params:
+        return _parse_codes(params['priority_codes'])
+
+    return None
 
 
 def collect_secrets(ssm_path):
@@ -155,14 +158,14 @@ def collect_chart(org_name, secrets):
 
 
 def process_chart(params, chart_dict, omit_list, other, no_program):
-    '''
+    """
     Process chart of accounts to remove unneeded programs,
     and inject some extra (meta) programs.
 
-    5-digit codes are inactive and should be ignored.
+    5-digit codes are inactive and should be ignored in most cases.
     8-digit codes are active, but only the first 6 digits are significant,
     i.e. 12345601 and 12345602 should be deduplicated as 123456.
-    '''
+    """
 
     # deduplicate on shortened numeric codes
     # pre-populate with codes to omit to short-circuit their processing
@@ -172,41 +175,60 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
     # output object
     out_chart = {}
 
-    # inject "no program" code
-    if _param_no_program_bool(params):
-        out_chart[no_program] = "No Program"
+    # whether to filter out inactive codes
+    code_len = 5
+    if _param_inactive_bool(params):
+        code_len = 6
 
-    # inject "other" code
-    if _param_other_bool(params):
-        out_chart[other] = "Other"
-
-    # whether or not to filter out inactive codes
-    _skip_inactive = _param_inactive_bool(params)
+    # optionally move this list of codes to the top of the output
+    priority_codes = _param_priority_list(params)
 
     # add short codes
     for code, name in chart_dict.items():
-        code_len = 5
-        if _skip_inactive:
-            code_len = 6
-
         if len(code) >= code_len:
             short = code[:6]  # ignore the last two digits on active codes
-            if short not in found_codes:
+
+            if short in found_codes:
+                LOG.info(f"Code {short} has already been processed")
+                continue
+
+            if priority_codes is not None:
+                if short in priority_codes:
+                    # Since Python 3.7, python dictionaries preserve insertion
+                    # order, so to prepend an item to the top of the dictionary,
+                    # we create a new dictionary inserting the target code first,
+                    # then add the previous output, and finally save the new
+                    # dictionary as our output dictionary.
+                    new_chart = {short: name}
+                    new_chart.update(out_chart)
+                    out_chart = new_chart
+                    found_codes.append(short)
+                else:
+                    out_chart[short] = name
+                    found_codes.append(short)
+            else:
                 out_chart[short] = name
                 found_codes.append(short)
 
+    # inject "other" code
+    if _param_other_bool(params):
+        new_chart = {other: "Other"}
+        new_chart.update(out_chart)
+        out_chart = new_chart
+
+    # inject "no program" code
+    if _param_no_program_bool(params):
+        new_chart = {no_program: "No Program"}
+        new_chart.update(out_chart)
+        out_chart = new_chart
+
     return out_chart
 
-def filter_chart(params, raw_chart, omit_list, other, no_program):
-    '''
-    Optionally process the chart of accounts based on a query-string parameter."
-    '''
 
-    mips_dict = raw_chart
-
-    # if an 'enable_code_filter' query-string parameter is defined, process the chart
-    if _param_filter_bool(params):
-        mips_dict = process_chart(params, raw_chart, omit_list, other, no_program)
+def limit_chart(params, mips_dict):
+    """
+    Optionally limit the size of the chart based on a query-string parameter.
+    """
 
     # if a 'limit' query-string parameter is defined, "slice" the dictionary
     limit = _param_limit_int(params)
@@ -216,6 +238,7 @@ def filter_chart(params, raw_chart, omit_list, other, no_program):
         return _mips_dict
 
     return mips_dict
+
 
 def list_tags(params, chart_dict):
     '''
@@ -284,34 +307,40 @@ def lambda_handler(event, context):
         api_routes['ApiValidTags'] = _get_os_var('ApiValidTags')
 
         _to_omit = _get_os_var('CodesToOmit')
-        omit_codes_list = _parse_omit_codes(_to_omit)
+        omit_codes_list = _parse_codes(_to_omit)
 
         # get secure parameters
         ssm_secrets = collect_secrets(ssm_path)
 
         # get chart of accounts from mips
         raw_chart = collect_chart(mips_org, ssm_secrets)
+        LOG.debug(f"Raw chart data: {raw_chart}")
 
         # collect query-string parameters
         params = {}
         if 'queryStringParameters' in event:
             params = event['queryStringParameters']
+            LOG.debug(f"Query-string parameters: {params}")
 
         # parse the path and return appropriate data
         if 'path' in event:
             event_path = event['path']
 
+            # always process the chart of accounts
+            mips_chart = process_chart(params,
+                                       raw_chart,
+                                       omit_codes_list,
+                                       code_other,
+                                       code_no_program)
+
             if event_path == api_routes['ApiChartOfAccounts']:
-                # return chart of accounts, optionally processed
-                mips_chart = filter_chart(params, raw_chart, omit_codes_list, code_other, code_no_program)
-                return _build_return(200, mips_chart)
+                # conditionally limit the size of the output
+                _mips_chart = limit_chart(params, mips_chart)
+                return _build_return(200, _mips_chart)
 
             elif event_path == api_routes['ApiValidTags']:
-                # always process the chart for the tags list
-                mips_chart = process_chart(params, raw_chart, omit_codes_list, code_other, code_no_program)
+                # build a list of strings from the processed dictionary
                 valid_tags = list_tags(params, mips_chart)
-
-                # return valid tags
                 return _build_return(200, valid_tags)
 
             else:
