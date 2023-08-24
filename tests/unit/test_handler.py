@@ -145,6 +145,7 @@ expected_mips_dict_processed_limit = {
 
 expected_mips_dict_processed_priority_codes = {
     '000000': 'No Program',
+    '54321': 'Inactive',
     '123456': 'Program Part A',
     '234567': 'Other Program',
     '990300': 'Platform Infrastructure',
@@ -168,7 +169,7 @@ expected_tag_list_limit = [
 mock_foo_param = {'foo': 'bar'}
 mock_limit_param = {'limit': '2'}
 mock_other_param = {'show_other_code': 'true'}
-mock_priority_param = {'priority_codes': '234567'}
+mock_priority_param = {'priority_codes': '54321'}
 mock_inactive_param = {'show_inactive_codes': 'true'}
 mock_no_program_param = {'hide_no_program_code': 'true'}
 
@@ -352,7 +353,9 @@ def test_parse_codes(code_str, code_list):
             (mock_other_param, expected_mips_dict_processed_other),
             (mock_inactive_param, expected_mips_dict_processed_inactive),
             (mock_no_program_param, expected_mips_dict_processed_no),
-            (mock_priority_param, expected_mips_dict_processed_priority_codes),
+            (mock_priority_param, expected_mips_dict_processed),
+            (mock_priority_param | mock_inactive_param,
+             expected_mips_dict_processed_priority_codes),
             (mock_other_param | mock_no_program_param,
              expected_mips_dict_processed_other_no),
         ]
@@ -363,7 +366,7 @@ def test_process_chart(params, expected_dict):
                                              expected_omit_codes,
                                              other_code,
                                              no_program_code)
-    assert processed_chart == expected_dict
+    assert json.dumps(processed_chart) == json.dumps(expected_dict)
 
 
 @pytest.mark.parametrize(

@@ -8,8 +8,8 @@ API and present the data in a useful format.
 
 Formats available:
 
-| Route     | Description                                                              |
-| --------- |--------------------------------------------------------------------------|
+| API Route | Description                                                              |
+|-----------|--------------------------------------------------------------------------|
 | /accounts | A dictionary mapping the chart of accounts to their friendly names.      |
 | /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`. |
 
@@ -31,8 +31,12 @@ By default, the lambda will process the chart of accounts received to remove
 inactive codes, deduplicate the significant portion of active codes, and add
 a "No Program" entry mapped to a code configured in a template parameter. Each
 of these actions can be toggled with query-string parameters, except for
-deduplication. Specific account codes from the chart of accounts can be ignored
-globally with the `CodesToOmit`template parameter.
+deduplication.
+
+Specific account codes from the chart of accounts can be ignored globally with
+the `CodesToOmit` template parameter. Remaining codes will be returned in
+numeric order as either a list of strings or a json dictionary depending on the
+API route.
 
 ### Required Secure Parameters
 
@@ -87,10 +91,10 @@ A `show_inactive_codes` parameter is available to prevent the default removal of
 inactive codes. If this parameter is set to any non-false value, inactive codes
 will be included in the output.
 
-A `priority_codes` parameter is available to prioritize specified entries
-from the chart of accounts to the top of the output; `OtherCode` and
-`NoProgramCode` are always prioritized when included.
-Example value: `"123456,654321"`.
+By default, the output is ordered by numeric code. A `priority_codes` parameter
+is available to select specific programs to prioritize to the beginning of the
+output regardless of their code; `OtherCode` and`NoProgramCode` are always
+prioritized when included. Example value: `123456,654321`.
 
 A `limit` parameter is available to restrict the number of items returned. This
 value must be a positive integer, a value of zero disables the parameter.
