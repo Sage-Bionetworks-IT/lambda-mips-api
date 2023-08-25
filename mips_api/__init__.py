@@ -107,7 +107,9 @@ def collect_chart(org_name, secrets):
 
     mips_dict = {}
     access_token = None
+    timeout = 5
     try:
+        LOG.info('Logging in to upstream API')
         # get mips access token
         mips_creds = {
             'username': secrets['user'],
@@ -117,6 +119,7 @@ def collect_chart(org_name, secrets):
         login_response=requests.post(
             _mips_url_login,
             json=mips_creds,
+            timeout=timeout,
         )
         login_response.raise_for_status()
         access_token = login_response.json()["AccessToken"]
@@ -132,6 +135,7 @@ def collect_chart(org_name, secrets):
             _mips_url_chart,
             chart_params,
             headers={"Authorization-Token":access_token},
+            timeout=timeout,
         )
         chart_response.raise_for_status()
         accounts = chart_response.json()["data"]
@@ -141,15 +145,20 @@ def collect_chart(org_name, secrets):
             mips_dict[a['accountCodeId']] = a['accountTitle']
 
     except Exception as exc:
-        LOG.error('Error interacting with mips')
+        LOG.exception('Error interacting with mips')
         raise exc
 
     finally:
         # It's important to logout. Logging in a second time without logging out will lock us out of MIPS
-        requests.post(
-            _mips_url_logout,
-            headers={"Authorization-Token":access_token},
-        )
+        LOG.info('Logging out of upstream API')
+        try:
+            requests.post(
+                _mips_url_logout,
+                headers={"Authorization-Token":access_token},
+                timeout=timeout,
+            )
+        except Exception as exc:
+            LOG.exception('Error logging out')
 
     return mips_dict
 
