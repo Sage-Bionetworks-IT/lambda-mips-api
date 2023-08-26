@@ -62,11 +62,15 @@ mock_chart = {
     'data': [
         {
             'accountCodeId': '12345600',
-            'accountTitle': 'Other Program A',
+            'accountTitle': 'Program Part A',
         },
         {
             'accountCodeId': '12345601',
-            'accountTitle': 'Other Program B',
+            'accountTitle': 'Program Part B',
+        },
+        {
+            'accountCodeId': '23456700',
+            'accountTitle': 'Other Program',
         },
         {
             'accountCodeId': '54321',
@@ -85,74 +89,89 @@ mock_chart = {
 
 # expected internal dictionary
 expected_mips_dict_raw = {
-    '12345600': 'Other Program A',
-    '12345601': 'Other Program B',
+    '12345600': 'Program Part A',
+    '12345601': 'Program Part B',
+    '23456700': 'Other Program',
     '54321': 'Inactive',
     '99030000': 'Platform Infrastructure',
     '99990000': 'Unfunded',
 }
 
 expected_mips_dict_raw_limit = {
-    '12345600': 'Other Program A',
-    '12345601': 'Other Program B',
+    '12345600': 'Program Part A',
+    '12345601': 'Program Part B',
 }
 
 expected_mips_dict_processed = {
     '000000': 'No Program',
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+    '234567': 'Other Program',
     '990300': 'Platform Infrastructure',
 }
 
 expected_mips_dict_processed_other = {
     '000000': 'No Program',
     '000001': 'Other',
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+    '234567': 'Other Program',
     '990300': 'Platform Infrastructure',
 }
 
 expected_mips_dict_processed_no = {
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+    '234567': 'Other Program',
     '990300': 'Platform Infrastructure',
 }
 
 expected_mips_dict_processed_other_no = {
     '000001': 'Other',
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+    '234567': 'Other Program',
     '990300': 'Platform Infrastructure',
 }
 
 expected_mips_dict_processed_inactive = {
     '000000': 'No Program',
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+    '234567': 'Other Program',
     '54321': 'Inactive',
     '990300': 'Platform Infrastructure',
 }
 
 expected_mips_dict_processed_limit = {
     '000000': 'No Program',
-    '123456': 'Other Program A',
+    '123456': 'Program Part A',
+}
+
+expected_mips_dict_processed_priority_codes = {
+    '000000': 'No Program',
+    '54321': 'Inactive',
+    '123456': 'Program Part A',
+    '234567': 'Other Program',
+    '990300': 'Platform Infrastructure',
 }
 
 # expected tag list
 expected_tag_list = [
     'No Program / 000000',
-    'Other Program A / 123456',
+    'Program Part A / 123456',
+    'Other Program / 234567',
     'Platform Infrastructure / 990300',
 ]
 
 # expected tag list
 expected_tag_list_limit = [
     'No Program / 000000',
-    'Other Program A / 123456',
+    'Program Part A / 123456',
 ]
 
 # mock query-string parameters
-mock_foo_param = { 'foo': 'bar' }
-mock_limit_param = { 'limit': '2' }
-mock_other_param = { 'enable_other_code': 'true' }
-mock_filter_param = { 'enable_code_filter': 'true' }
-mock_inactive_param = { 'disable_inactive_filter': 'true' }
-mock_no_program_param = { 'disable_no_program_code': 'true' }
+mock_foo_param = {'foo': 'bar'}
+mock_limit_param = {'limit': '2'}
+mock_other_param = {'show_other_code': 'true'}
+mock_priority_param = {'priority_codes': '54321'}
+mock_inactive_param = {'show_inactive_codes': 'true'}
+mock_no_program_param = {'hide_no_program_code': 'true'}
 
 
 def apigw_event(path, qsp={"foo": "bar"}):
@@ -321,8 +340,8 @@ def test_chart(requests_mock):
             (omit_codes, expected_omit_codes),
         ]
     )
-def test_parse_omit(code_str, code_list):
-    parsed_omit_codes = mips_api._parse_omit_codes(code_str)
+def test_parse_codes(code_str, code_list):
+    parsed_omit_codes = mips_api._parse_codes(code_str)
     assert parsed_omit_codes == code_list
 
 
@@ -334,12 +353,20 @@ def test_parse_omit(code_str, code_list):
             (mock_other_param, expected_mips_dict_processed_other),
             (mock_inactive_param, expected_mips_dict_processed_inactive),
             (mock_no_program_param, expected_mips_dict_processed_no),
-            (mock_other_param | mock_no_program_param, expected_mips_dict_processed_other_no),
+            (mock_priority_param, expected_mips_dict_processed),
+            (mock_priority_param | mock_inactive_param,
+             expected_mips_dict_processed_priority_codes),
+            (mock_other_param | mock_no_program_param,
+             expected_mips_dict_processed_other_no),
         ]
     )
 def test_process_chart(params, expected_dict):
-    processed_chart = mips_api.process_chart(params, expected_mips_dict_raw, expected_omit_codes, other_code, no_program_code)
-    assert processed_chart == expected_dict
+    processed_chart = mips_api.process_chart(params,
+                                             expected_mips_dict_raw,
+                                             expected_omit_codes,
+                                             other_code,
+                                             no_program_code)
+    assert json.dumps(processed_chart) == json.dumps(expected_dict)
 
 
 @pytest.mark.parametrize(
@@ -387,18 +414,17 @@ def test_param_limit_int_err(params):
 
 
 @pytest.mark.parametrize(
-        "params,expected_dict",
+        "params,input_chart,expected_chart",
         [
-            ({}, expected_mips_dict_raw),
-            (mock_foo_param, expected_mips_dict_raw),
-            (mock_limit_param, expected_mips_dict_raw_limit),
-            (mock_filter_param, expected_mips_dict_processed),
-            (mock_limit_param | mock_filter_param, expected_mips_dict_processed_limit),
+            ({}, expected_mips_dict_processed, expected_mips_dict_processed),
+            (mock_foo_param, expected_mips_dict_raw, expected_mips_dict_raw),
+            (mock_limit_param, expected_mips_dict_raw, expected_mips_dict_raw_limit),
+            (mock_limit_param | mock_foo_param, expected_mips_dict_processed, expected_mips_dict_processed_limit),
         ]
     )
-def test_filter_chart(params, expected_dict):
-    processed_chart = mips_api.filter_chart(params, expected_mips_dict_raw, expected_omit_codes, other_code, no_program_code)
-    assert processed_chart == expected_dict
+def test_limit_chart(params, input_chart, expected_chart):
+    processed_chart = mips_api.limit_chart(params, input_chart)
+    assert processed_chart == expected_chart
 
 
 @pytest.mark.parametrize(
@@ -469,10 +495,16 @@ def test_lambda_handler_invalid_path(invalid_event, mocker):
     _test_with_env(mocker, invalid_event, 404, error='Invalid request path')
 
 
+def test_lambda_handler_empty_event(mocker):
+    '''Test empty event'''
+
+    _test_with_env(mocker, {}, 400, error='Invalid event: No path found: {}')
+
+
 def test_lambda_handler_accounts(accounts_event, mocker):
     '''Test chart-of-accounts event'''
 
-    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict_raw)
+    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict_processed)
 
 
 def test_lambda_handler_tags(tags_event, mocker):
