@@ -6,7 +6,7 @@ Description: >
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 60
 
 Parameters:
   AcmCertificateArn:
@@ -122,6 +122,7 @@ Resources:
             OriginPath: /Prod
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
+              OriginReadTimeout: 60
         HttpVersion: http2
         Aliases: !If [ HasDnsNames, !Ref DnsNames, !Ref "AWS::NoValue" ]
         ViewerCertificate:

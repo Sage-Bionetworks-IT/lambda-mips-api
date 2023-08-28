@@ -2,8 +2,11 @@ import json
 import logging
 import os
 
+import backoff
 import boto3
 import requests
+from requests.exceptions import RequestException
+from urllib3.exceptions import RequestError
 
 
 LOG = logging.getLogger(__name__)
@@ -105,63 +108,121 @@ def collect_secrets(ssm_path):
     return ssm_secrets
 
 
+@backoff.on_exception(backoff.expo,
+                      (RequestError, RequestException),
+                      max_time=11)
+def _request_login(creds):
+    """
+    Wrap login request with backoff decorator, using exponential backoff
+    and running for at most 11 seconds. With a connection timeout of 4
+    seconds, this allows two attempts.
+    """
+    timeout = 4
+    LOG.info('Logging in to upstream API')
+
+    login_response = requests.post(
+        _mips_url_login,
+        json=creds,
+        timeout=timeout,
+    )
+    login_response.raise_for_status()
+    token = login_response.json()['AccessToken']
+    return token
+
+
+@backoff.on_exception(backoff.expo,
+                      (RequestError, RequestException),
+                      max_time=11)
+def _request_chart(access_token):
+    """
+    Wrap the request for chart of accounts with backoff decorator, using
+    exponential backoff and running for at most 11 seconds. With a
+    connection timeout of 4 seconds, this allows two attempts.
+    """
+    timeout = 4
+    LOG.info('Getting chart of accounts')
+
+    # Per Finance we filter the results taking just the records where segment=Program and status=A
+    # There are about 150 records. We use a page size of 500 to get all the results in a single request.
+    chart_params = {
+        "filter[segmentId]": "Program",
+        "filter[accountStatusId]": "A",
+        "page[size]": "500"
+    }
+    chart_response = requests.get(
+        _mips_url_chart,
+        chart_params,
+        headers={"Authorization-Token": access_token},
+        timeout=timeout,
+    )
+    chart_response.raise_for_status()
+    data = chart_response.json()["data"]
+    return data
+
+
+@backoff.on_exception(backoff.fibo,
+                      (RequestError, RequestException),
+                      max_time=28)
+def _request_logout(access_token):
+    """
+    Wrap logout request with backoff decorator, using fibonacci backoff
+    and running for at most 28 seconds. With a connection timeout of 6
+    seconds, this allows three attempts.
+
+    Prioritize spending time logging out over the other requests because
+    failing to log out after successfully logging in will lock us out of
+    the API; but CloudFront will only wait a maximum of 60 seconds for a
+    response from this lambda.
+    """
+    timeout = 6
+    LOG.info('Logging out of upstream API')
+
+    requests.post(
+        _mips_url_logout,
+        headers={"Authorization-Token": access_token},
+        timeout=timeout,
+    )
+
+
 def collect_chart(org_name, secrets):
-    '''Log into MIPS, get the chart of accounts, and log out'''
+    """
+    Log into MIPS, get the chart of accounts, and log out
+    """
 
     mips_dict = {}
     access_token = None
     timeout = 5
+
+    mips_creds = {
+        'username': secrets['user'],
+        'password': secrets['pass'],
+        'org': org_name,
+    }
+
     try:
-        LOG.info('Logging in to upstream API')
         # get mips access token
-        mips_creds = {
-            'username': secrets['user'],
-            'password': secrets['pass'],
-            'org': org_name,
-        }
-        login_response=requests.post(
-            _mips_url_login,
-            json=mips_creds,
-            timeout=timeout,
-        )
-        login_response.raise_for_status()
-        access_token = login_response.json()["AccessToken"]
+        access_token = _request_login(mips_creds)
 
-        # Per Finance we filter the results taking just the records where segment=Program and status=A
-        # There are about 150 records. We use a page size of 500 to get all the results in a single request.
-        chart_params = {
-            "filter[segmentId]":"Program",
-            "filter[accountStatusId]":"A",
-            "page[size]":"500"
-        }
-        chart_response=requests.get(
-            _mips_url_chart,
-            chart_params,
-            headers={"Authorization-Token":access_token},
-            timeout=timeout,
-        )
-        chart_response.raise_for_status()
-        accounts = chart_response.json()["data"]
+        # get the chart of accounts
+        accounts = _request_chart(access_token)
 
-        # save chart of accounts as a dict mapping code to title, e.g. { '990300': 'Platform Infrastructure' }
+        # save chart of accounts as a dict mapping code to title,
+        # e.g. { '990300': 'Platform Infrastructure' }
         for a in accounts:
             mips_dict[a['accountCodeId']] = a['accountTitle']
 
     except Exception as exc:
-        LOG.exception('Error interacting with mips')
+        LOG.exception('Error interacting with upstream API')
         raise exc
 
     finally:
-        # It's important to logout. Logging in a second time without logging out will lock us out of MIPS
-        LOG.info('Logging out of upstream API')
-        try:
-            requests.post(
-                _mips_url_logout,
-                headers={"Authorization-Token":access_token},
-                timeout=timeout,
-            )
-        except Exception as exc:
-            LOG.exception('Error logging out')
+        # It's important to logout. Logging in a second time without
+        # logging out will lock us out of the upstream API
+        if access_token is not None:
+            try:
+                _request_logout(access_token)
+            except Exception as exc:
+                LOG.exception('Error logging out')
 
     return mips_dict
 
