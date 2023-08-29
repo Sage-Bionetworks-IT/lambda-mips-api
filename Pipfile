@@ -13,6 +13,7 @@ boto3 = "~=1.24"
 [packages]
 requests = "~=2.0"
 urllib3 = "<2"
+backoff = "~=2.2"
 
 [requires]
 python_version = "3.9"
