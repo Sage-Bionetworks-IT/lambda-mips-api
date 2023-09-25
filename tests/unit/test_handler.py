@@ -254,6 +254,7 @@ def tags_limit_event():
 def test_secrets(mocker):
     '''Test getting secret parameters from SSM'''
     # stub ssm client
+    mocker.patch.dict(os.environ, {'AWS_DEFAULT_REGION': 'test'})
     ssm = boto3.client('ssm')
     mips_api.ssm_client = ssm
     with Stubber(ssm) as _stub:
@@ -265,9 +266,10 @@ def test_secrets(mocker):
             assert secrets == mock_secrets
 
 
-def test_no_secrets():
+def test_no_secrets(mocker):
     '''Test failure getting secret parameters from SSM'''
     # stub ssm client
+    mocker.patch.dict(os.environ, {'AWS_DEFAULT_REGION': 'test'})
     ssm = boto3.client('ssm')
     mips_api.ssm_client = ssm
     with Stubber(ssm) as _stub:
@@ -279,9 +281,10 @@ def test_no_secrets():
             secrets = mips_api.collect_secrets(ssm_path)
 
 
-def test_bad_secrets():
+def test_bad_secrets(mocker):
     '''Test failure getting secret parameters from SSM'''
     # stub ssm client
+    mocker.patch.dict(os.environ, {'AWS_DEFAULT_REGION': 'test'})
     ssm = boto3.client('ssm')
     mips_api.ssm_client = ssm
     with Stubber(ssm) as _stub:
