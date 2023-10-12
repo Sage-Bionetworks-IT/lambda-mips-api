@@ -165,6 +165,7 @@ If a bad response has been cached, it may need to be [manually invalidated throu
 Contributions are welcome.
 
 ### Install Requirements
+
 Run `pipenv install --dev` to install both production and development
 requirements, and `pipenv shell` to activate the virtual environment. For more
 information see the [pipenv docs](https://pipenv.pypa.io/en/latest/).
@@ -173,35 +174,49 @@ After activating the virtual environment, run `pre-commit install` to install
 the [pre-commit](https://pre-commit.com/) git hook.
 
 ### Update Requirements
-First, make any needed updates to the base requirements in `Pipfile`,
-then use `pipenv` to regenerate both `Pipfile.lock` and
-`requirements.txt`. We use `pipenv` to control versions in testing,
-but `sam` relies on `requirements.txt` directly for building the
-container used by the lambda.
+
+First, make any needed updates to the base requirements in `Pipfile`, then use
+`pipenv` to regenerate both `Pipfile.lock` and `requirements.txt`.
 
 ```shell script
-$ pipenv update
+$ pipenv update --dev
+```
+
+We use `pipenv` to control versions in testing, but `sam` relies on
+`requirements.txt` directly for building the lambda artifact, so we dynamically
+generate `requirements.txt` from `Pipfile.lock` before building the artifact.
+The file must be created in the `CodeUri` directory specified in
+`template.yaml`.
+
+```shell script
 $ pipenv requirements > requirements.txt
 ```
 
 Additionally, `pre-commit` manages its own requirements.
+
 ```shell script
 $ pre-commit autoupdate
 ```
 
 ### Create a local build
 
+Use a Lambda-like docker container to build the Lambda artifact
+
 ```shell script
-$ sam build
+$ sam build --use-container
 ```
 
 ### Run unit tests
-Tests are defined in the `tests` folder in this project. Use PIP to install the
-[pytest](https://docs.pytest.org/en/latest/) and run unit tests.
+
+Tests are defined in the `tests` folder in this project, and dependencies are
+managed with `pipenv`. Install the development dependencies and run the tests
+using `coverage`.
 
 ```shell script
-$ python -m pytest tests/ -s -v
+$ pipenv run coverage run -m pytest tests/ -svv
 ```
+
+Automated testing will upload coverage results to [Coveralls](coveralls.io).
 
 ### Run integration tests
 Running integration tests
