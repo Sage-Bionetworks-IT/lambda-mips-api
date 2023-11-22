@@ -10,7 +10,7 @@ from urllib3.exceptions import RequestError
 
 
 LOG = logging.getLogger(__name__)
-LOG.setLevel(logging.INFO)
+LOG.setLevel(logging.DEBUG)
 
 _mips_url_login = 'https://login.mip.com/api/v1/sso/mipadv/login'
 _mips_url_chart = 'https://api.mip.com/api/v1/maintain/chartofaccounts'
@@ -73,7 +73,7 @@ def _param_priority_list(params):
 
 
 def collect_secrets(ssm_path):
-    '''Collect secure parameters from SSM'''
+    """Collect secure parameters from SSM"""
 
     # create boto client
     global ssm_client
@@ -126,6 +126,7 @@ def _request_login(creds):
         timeout=timeout,
     )
     login_response.raise_for_status()
+
     token = login_response.json()['AccessToken']
     return token
 
@@ -156,8 +157,14 @@ def _request_chart(access_token):
         timeout=timeout,
     )
     chart_response.raise_for_status()
-    data = chart_response.json()["data"]
-    return data
+    json_response = chart_response.json()
+    LOG.debug(f"Raw chart json: {json_response}")
+
+    data = json_response["data"]
+    if data:
+        return data
+    else:
+        raise ValueError("Empty Chart of Accounts")
 
 
 @backoff.on_exception(backoff.fibo,
@@ -311,14 +318,14 @@ def limit_chart(params, mips_dict):
 
 
 def list_tags(params, chart_dict):
-    '''
+    """
     Generate a list of valid AWS tags. Only active codes are listed.
 
     The string format is `{Program Name} / {Program Code}`.
 
     Returns
         A list of strings.
-    '''
+    """
 
     tags = []
 
