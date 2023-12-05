@@ -57,35 +57,74 @@ mock_token = {
     'AccessToken': 'testToken',
 }
 
-# mock chart of accounts response from upstream api
-mock_chart = {
-    'data': [
+mock_segments = {
+    'COA_SEGID': [
         {
-            'accountCodeId': '12345600',
-            'accountTitle': 'Program Part A',
+            'COA_SEGID': 0,
+            'TITLE': "Fund",
         },
         {
-            'accountCodeId': '12345601',
-            'accountTitle': 'Program Part B',
+            'COA_SEGID': 1,
+            'TITLE': "Program",
+        }
+    ]
+}
+
+expected_segid = 1
+
+mock_accounts = {
+    'COA_SEGID': [
+        {
+            'COA_SEGID': 0,
+            'COA_CODE': "1",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Direct"
         },
         {
-            'accountCodeId': '23456700',
-            'accountTitle': 'Other Program',
+            'COA_SEGID': 1,
+            'COA_CODE': "12345600",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Program Part A"
         },
         {
-            'accountCodeId': '54321',
-            'accountTitle': 'Inactive',
+            'COA_SEGID': 1,
+            'COA_CODE': "12345601",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Program Part B"
         },
         {
-            'accountCodeId': '99030000',
-            'accountTitle': 'Platform Infrastructure',
+            'COA_SEGID': 1,
+            'COA_CODE': "23456700",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Other Program"
         },
         {
-            'accountCodeId': '99990000',
-            'accountTitle': 'Unfunded',
+            'COA_SEGID': 1,
+            'COA_CODE': "54321",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Inactive"
+        },
+        {
+            'COA_SEGID': 1,
+            'COA_CODE': "99030000",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Platform Infrastructure"
+        },
+        {
+            'COA_SEGID': 1,
+            'COA_CODE': "99990000",
+            'COA_STATUS': "A",
+            'COA_TITLE': "Unfunded"
+        },
+        {
+            'COA_SEGID': 1,
+            'COA_CODE': "76543200",
+            'COA_STATUS': "I",
+            'COA_TITLE': "Ignored"
         },
     ]
 }
+
 
 # expected internal dictionary
 expected_mips_dict_raw = {
@@ -308,7 +347,9 @@ def test_chart(requests_mock):
 
     # inject mock responses into `requests`
     login_mock = requests_mock.post(mips_api._mips_url_login, json=mock_token)
-    chart_mock = requests_mock.get(mips_api._mips_url_chart, json=mock_chart)
+    segment_mock = requests_mock.get(mips_api._mips_url_coa_segments, json=mock_segments)
+    account_mock = requests_mock.get(mips_api._mips_url_coa_accounts, json=mock_accounts)
+
     logout_mock = requests_mock.post(mips_api._mips_url_logout)
 
     # get chart of accounts from mips
@@ -319,13 +360,14 @@ def test_chart(requests_mock):
 
     # assert all mock urls were called
     assert login_mock.call_count == 1
-    assert chart_mock.call_count == 1
+    assert segment_mock.call_count == 1
+    assert account_mock.call_count == 1
     assert logout_mock.call_count == 1
 
     # begin a second test with an alternate requests response
 
     # inject new mock response with an Exception
-    requests_mock.get(mips_api._mips_url_chart, exc=Exception)
+    requests_mock.get(mips_api._mips_url_coa_segments, exc=Exception)
 
     # assert logout is called when an exception is raised
     with pytest.raises(Exception):
