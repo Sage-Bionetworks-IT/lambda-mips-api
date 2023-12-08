@@ -64,6 +64,8 @@ The following template parameters are set as environment variables in the lambda
 | CodesToOmit        | CodesToOmit          | List of numeric codes to remove from output.       |
 | NoProgramCode      | NoProgramCode        | Numeric code to use for "No Program" entry.        |
 | OtherCode          | OtherCode            | Numeric code to use for "Other" entry.             |
+| CacheBucket        | CacheBucket          | Name of the S3 bucket created for the cache.       |
+| CacheBucketPath    | CacheBucketPath      | Path to the cache object in the S3 bucket.         |
 
 ### Query String Parameters
 

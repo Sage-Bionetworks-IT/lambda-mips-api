@@ -11,15 +11,16 @@ from urllib3.exceptions import RequestError
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
 
-_mips_url_login = 'https://login.mip.com/api/v1/sso/mipadv/login'
-_mips_url_coa_segments = 'https://api.mip.com/api/coa/segments'
-_mips_url_coa_accounts = 'https://api.mip.com/api/coa/segments/accounts'
-_mips_url_logout = 'https://api.mip.com/api/security/logout'
+_mips_url_login = "https://login.mip.com/api/v1/sso/mipadv/login"
+_mips_url_coa_segments = "https://api.mip.com/api/coa/segments"
+_mips_url_coa_accounts = "https://api.mip.com/api/coa/segments/accounts"
+_mips_url_logout = "https://api.mip.com/api/security/logout"
 
-# This is global so that it can be stubbed in test.
-# Because this is global its value will be retained
+# These are global so that they can be stubbed in test.
+# Because they are global their value will be retained
 # in the lambda environment and re-used on warm runs.
 ssm_client = None
+s3_client = None
 
 
 def _get_os_var(varnam):
@@ -32,33 +33,33 @@ def _get_os_var(varnam):
 def _parse_codes(codes):
     data = []
     if codes:
-        data = codes.split(',')
+        data = codes.split(",")
     return data
 
 
 def _param_bool(params, param):
     if params and param in params:
-        if params[param].lower() not in ['false', 'no', 'off']:
+        if params[param].lower() not in ["false", "no", "off"]:
             return True
     return False
 
 
 def _param_inactive_bool(params):
-    return not _param_bool(params, 'show_inactive_codes')
+    return not _param_bool(params, "show_inactive_codes")
 
 
 def _param_other_bool(params):
-    return _param_bool(params, 'show_other_code')
+    return _param_bool(params, "show_other_code")
 
 
 def _param_no_program_bool(params):
-    return not _param_bool(params, 'hide_no_program_code')
+    return not _param_bool(params, "hide_no_program_code")
 
 
 def _param_limit_int(params):
-    if params and 'limit' in params:
+    if params and "limit" in params:
         try:
-            return int(params['limit'])
+            return int(params["limit"])
         except ValueError as exc:
             err_str = "QueryStringParameter 'limit' must be an Integer"
             raise ValueError(err_str) from exc
@@ -66,19 +67,19 @@ def _param_limit_int(params):
 
 
 def _param_priority_list(params):
-    if params and 'priority_codes' in params:
-        return _parse_codes(params['priority_codes'])
+    if params and "priority_codes" in params:
+        return _parse_codes(params["priority_codes"])
 
     return None
 
 
 def collect_secrets(ssm_path):
-    '''Collect secure parameters from SSM'''
+    """Collect secure parameters from SSM"""
 
     # create boto client
     global ssm_client
     if ssm_client is None:
-        ssm_client = boto3.client('ssm')
+        ssm_client = boto3.client("ssm")
 
     # object to return
     ssm_secrets = {}
@@ -89,28 +90,26 @@ def collect_secrets(ssm_path):
         Recursive=True,
         WithDecryption=True,
     )
-    if 'Parameters' in params:
-        for p in params['Parameters']:
+    if "Parameters" in params:
+        for p in params["Parameters"]:
             # strip leading path plus / char
-            if len(p['Name']) > len(ssm_path):
-                name = p['Name'][len(ssm_path) + 1:]
+            if len(p["Name"]) > len(ssm_path):
+                name = p["Name"][len(ssm_path) + 1 :]
             else:
-                name = p['Name']
-            ssm_secrets[name] = p['Value']
+                name = p["Name"]
+            ssm_secrets[name] = p["Value"]
             LOG.info(f"Loaded secret: {name}")
     else:
         raise Exception(f"Invalid response from SSM client")
 
-    for reqkey in ['user', 'pass']:
+    for reqkey in ["user", "pass"]:
         if reqkey not in ssm_secrets:
             raise Exception(f"Missing required secure parameter: {reqkey}")
 
     return ssm_secrets
 
 
-@backoff.on_exception(backoff.expo,
-                      (RequestError, RequestException),
-                      max_time=11)
+@backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _request_login(creds):
     """
     Wrap login request with backoff decorator, using exponential backoff
@@ -118,7 +117,7 @@ def _request_login(creds):
     seconds, this allows two attempts.
     """
     timeout = 4
-    LOG.info('Logging in to upstream API')
+    LOG.info("Logging in to upstream API")
 
     login_response = requests.post(
         _mips_url_login,
@@ -126,13 +125,11 @@ def _request_login(creds):
         timeout=timeout,
     )
     login_response.raise_for_status()
-    token = login_response.json()['AccessToken']
+    token = login_response.json()["AccessToken"]
     return token
 
 
-@backoff.on_exception(backoff.expo,
-                      (RequestError, RequestException),
-                      max_time=11)
+@backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _request_program_segment(access_token):
     """
     Wrap the request for chart segment IDs with backoff decorator, using
@@ -141,7 +138,7 @@ def _request_program_segment(access_token):
     Only return the ID of the "Program" segment needed for filtering.
     """
     timeout = 4
-    LOG.info('Getting chart segments')
+    LOG.info("Getting chart segments")
 
     # get segments from api
     segment_response = requests.get(
@@ -166,9 +163,7 @@ def _request_program_segment(access_token):
     return seg_id
 
 
-@backoff.on_exception(backoff.expo,
-                      (RequestError, RequestException),
-                      max_time=11)
+@backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _request_accounts(access_token, program_id):
     """
     Wrap the request for chart of accounts with backoff decorator, using
@@ -177,7 +172,7 @@ def _request_accounts(access_token, program_id):
     Only return results for active accounts in the program segment.
     """
     timeout = 4
-    LOG.info('Getting chart of accounts')
+    LOG.info("Getting chart of accounts")
 
     # get segments from api
     account_response = requests.get(
@@ -199,9 +194,7 @@ def _request_accounts(access_token, program_id):
     return accounts
 
 
-@backoff.on_exception(backoff.fibo,
-                      (RequestError, RequestException),
-                      max_time=28)
+@backoff.on_exception(backoff.fibo, (RequestError, RequestException), max_time=28)
 def _request_logout(access_token):
     """
     Wrap logout request with backoff decorator, using fibonacci backoff
@@ -214,7 +207,7 @@ def _request_logout(access_token):
     response from this lambda.
     """
     timeout = 6
-    LOG.info('Logging out of upstream API')
+    LOG.info("Logging out of upstream API")
 
     requests.post(
         _mips_url_logout,
@@ -223,9 +216,38 @@ def _request_logout(access_token):
     )
 
 
-def collect_chart(org_name, secrets):
+def _s3_cache_read(bucket, path):
     """
-    Log into MIPS, get the chart of accounts, and log out
+    Read MIP response from S3 cache object
+    """
+    global s3_client
+    if s3_client is None:
+        s3_client = boto3.client("s3")
+
+    data = s3_client.get_object(Bucket=bucket, Key=path)
+    return json.loads(data["Body"].read())
+
+
+def _s3_cache_write(data, bucket, path):
+    """
+    Write MIP response to S3 cache object
+    """
+    global s3_client
+    if s3_client is None:
+        s3_client = boto3.client("s3")
+
+    body = json.dumps(data)
+    s3_client.put_object(Bucket=bucket, Key=path, Body=body)
+
+
+def collect_chart(org_name, secrets, bucket, path):
+    """
+    Access the Chart of Accounts from MIP Cloud, and implement a write-through
+    cache of successful responses to tolerate long-term faults in the upstream
+    API.
+
+    A successful API response will be stored in S3 indefinitely, to be retrieved
+    and used in the case of an API failure.
     """
 
     mips_dict = {}
@@ -233,9 +255,9 @@ def collect_chart(org_name, secrets):
     timeout = 5
 
     mips_creds = {
-        'username': secrets['user'],
-        'password': secrets['pass'],
-        'org': org_name,
+        "username": secrets["user"],
+        "password": secrets["pass"],
+        "org": org_name,
     }
 
     try:
@@ -249,8 +271,7 @@ def collect_chart(org_name, secrets):
         mips_dict = _request_accounts(access_token, program_id)
 
     except Exception as exc:
-        LOG.exception('Error interacting with upstream API')
-        raise exc
+        LOG.exception("Error interacting with upstream API")
 
     finally:
         # It's important to logout. Logging in a second time without
@@ -259,7 +280,25 @@ def collect_chart(org_name, secrets):
             try:
                 _request_logout(access_token)
             except Exception as exc:
-                LOG.exception('Error logging out')
+                LOG.exception("Error logging out")
+
+    if mips_dict:
+        # store write-through cache
+        LOG.debug("Write chart of accounts to S3")
+        try:
+            _s3_cache_write(mips_dict, bucket, path)
+        except Exception as exc:
+            LOG.exception("S3 write failure")
+    else:
+        # read cached value
+        LOG.debug("Read cached chart of accounts from S3")
+        try:
+            mips_dict = _s3_cache_read(bucket, path)
+        except Exception as exc:
+            LOG.exception("S3 read failure")
+
+    if not mips_dict:
+        raise ValueError("No valid chart of accounts found")
 
     return mips_dict
 
@@ -348,14 +387,14 @@ def limit_chart(params, mips_dict):
 
 
 def list_tags(params, chart_dict):
-    '''
+    """
     Generate a list of valid AWS tags. Only active codes are listed.
 
     The string format is `{Program Name} / {Program Code}`.
 
     Returns
         A list of strings.
-    '''
+    """
 
     tags = []
 
@@ -403,49 +442,49 @@ def lambda_handler(event, context):
 
     try:
         # collect environment variables
-        mips_org = _get_os_var('MipsOrg')
-        ssm_path = _get_os_var('SsmPath')
+        mips_org = _get_os_var("MipsOrg")
+        ssm_path = _get_os_var("SsmPath")
+        s3_bucket = _get_os_var("CacheBucket")
+        s3_path = _get_os_var("CacheBucketPath")
 
-        code_other = _get_os_var('OtherCode')
-        code_no_program = _get_os_var('NoProgramCode')
+        code_other = _get_os_var("OtherCode")
+        code_no_program = _get_os_var("NoProgramCode")
 
         api_routes = {}
-        api_routes['ApiChartOfAccounts'] = _get_os_var('ApiChartOfAccounts')
-        api_routes['ApiValidTags'] = _get_os_var('ApiValidTags')
+        api_routes["ApiChartOfAccounts"] = _get_os_var("ApiChartOfAccounts")
+        api_routes["ApiValidTags"] = _get_os_var("ApiValidTags")
 
-        _to_omit = _get_os_var('CodesToOmit')
+        _to_omit = _get_os_var("CodesToOmit")
         omit_codes_list = _parse_codes(_to_omit)
 
         # get secure parameters
         ssm_secrets = collect_secrets(ssm_path)
 
         # get chart of accounts from mips
-        raw_chart = collect_chart(mips_org, ssm_secrets)
+        raw_chart = collect_chart(mips_org, ssm_secrets, s3_bucket, s3_path)
         LOG.debug(f"Raw chart data: {raw_chart}")
 
         # collect query-string parameters
         params = {}
-        if 'queryStringParameters' in event:
-            params = event['queryStringParameters']
+        if "queryStringParameters" in event:
+            params = event["queryStringParameters"]
             LOG.debug(f"Query-string parameters: {params}")
 
         # parse the path and return appropriate data
-        if 'path' in event:
-            event_path = event['path']
+        if "path" in event:
+            event_path = event["path"]
 
             # always process the chart of accounts
-            mips_chart = process_chart(params,
-                                       raw_chart,
-                                       omit_codes_list,
-                                       code_other,
-                                       code_no_program)
+            mips_chart = process_chart(
+                params, raw_chart, omit_codes_list, code_other, code_no_program
+            )
 
-            if event_path == api_routes['ApiChartOfAccounts']:
+            if event_path == api_routes["ApiChartOfAccounts"]:
                 # conditionally limit the size of the output
                 _mips_chart = limit_chart(params, mips_chart)
                 return _build_return(200, _mips_chart)
 
-            elif event_path == api_routes['ApiValidTags']:
+            elif event_path == api_routes["ApiValidTags"]:
                 # build a list of strings from the processed dictionary
                 valid_tags = list_tags(params, mips_chart)
                 return _build_return(200, valid_tags)
