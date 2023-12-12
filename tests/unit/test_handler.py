@@ -337,6 +337,48 @@ def test_bad_secrets(mocker):
             secrets = mips_api.collect_secrets(ssm_path)
 
 
+def test_upstream(mocker, requests_mock):
+    """
+    Test getting chart of accounts from upstream API
+
+    Relies on `requests-mock.Mocker` fixture to inject mock `requests` responses.
+    Because requests-mock creates a requests transport adapter, responses are
+    global and not thread-safe. Run two tests sequentially to maintain control
+    over response order.
+    """
+
+    # inject mock responses into `requests`
+    login_mock = requests_mock.post(mips_api._mips_url_login, json=mock_token)
+    segment_mock = requests_mock.get(
+        mips_api._mips_url_coa_segments, json=mock_segments
+    )
+    account_mock = requests_mock.get(
+        mips_api._mips_url_coa_accounts, json=mock_accounts
+    )
+    logout_mock = requests_mock.post(mips_api._mips_url_logout)
+
+    # get chart of accounts from mips
+    mips_dict = mips_api._upstream_requests(org_name, mock_secrets)
+
+    # assert expected data
+    assert mips_dict == expected_mips_dict_raw
+
+    # assert all mock urls were called
+    assert login_mock.call_count == 1
+    assert segment_mock.call_count == 1
+    assert account_mock.call_count == 1
+    assert logout_mock.call_count == 1
+
+    # begin a second test with an alternate requests response
+
+    # inject new mock response with an Exception
+    requests_mock.get(mips_api._mips_url_coa_segments, exc=Exception)
+
+    # assert logout is called when an exception is raised
+    mips_api._upstream_requests(org_name, mock_secrets)
+    assert logout_mock.call_count == 2
+
+
 def test_cache_read(mocker):
     """Test reading from S3 cache object"""
     # stub s3 client
@@ -362,55 +404,51 @@ def test_cache_write(mocker):
         mips_api._s3_cache_write(expected_mips_dict_raw, s3_bucket, s3_path)
 
 
-def test_chart(mocker, requests_mock):
-    """
-    Test getting chart of accounts from upstream API
-
-    Relies on `requests-mock.Mocker` fixture to inject mock `requests` responses.
-    Because requests-mock creates a requests transport adapter, responses are
-    global and not thread-safe. Run two tests sequentially to maintain control
-    over response order.
-    """
-
-    # inject mock responses into `requests`
-    login_mock = requests_mock.post(mips_api._mips_url_login, json=mock_token)
-    segment_mock = requests_mock.get(
-        mips_api._mips_url_coa_segments, json=mock_segments
+@pytest.mark.parametrize(
+    "upstream_response,cache_response",
+    [
+        (expected_mips_dict_raw, None),
+        (None, expected_mips_dict_raw),
+        (expected_mips_dict_raw, expected_mips_dict_raw),
+    ],
+)
+def test_chart(mocker, upstream_response, cache_response):
+    """Test chart_cache() with no upstream response"""
+    mocker.patch(
+        "mips_api._upstream_requests",
+        autospec=True,
+        return_value=upstream_response,
     )
-    account_mock = requests_mock.get(
-        mips_api._mips_url_coa_accounts, json=mock_accounts
+    mocker.patch(
+        "mips_api._s3_cache_read",
+        autospec=True,
+        return_value=cache_response,
     )
-    logout_mock = requests_mock.post(mips_api._mips_url_logout)
+    write_mock = mocker.patch(
+        "mips_api._s3_cache_write",
+        autospec=True,
+    )
 
-    # mock s3 cache write
-    mocker.patch("mips_api._s3_cache_write", autospec=True)
+    found_dict = mips_api.chart_cache(org_name, mock_secrets, s3_bucket, s3_path)
+    assert found_dict == expected_mips_dict_raw
 
-    # get chart of accounts from mips
-    mips_dict = mips_api.collect_chart(org_name, mock_secrets, s3_bucket, s3_path)
 
-    # assert expected data
-    assert mips_dict == expected_mips_dict_raw
+def test_chart_invalid(mocker):
+    """Test chart_cache() with no valid response found"""
+    mocker.patch(
+        "mips_api._upstream_requests",
+        autospec=True,
+        return_value=None,
+    )
+    mocker.patch(
+        "mips_api._s3_cache_read",
+        autospec=True,
+        side_effect=Exception,
+    )
 
-    # assert all mock urls were called
-    assert login_mock.call_count == 1
-    assert segment_mock.call_count == 1
-    assert account_mock.call_count == 1
-    assert logout_mock.call_count == 1
-
-    # begin a second test with an alternate requests response
-
-    # inject new mock response with an Exception
-    requests_mock.get(mips_api._mips_url_coa_segments, exc=Exception)
-
-    # mock s3 cache read failure
-    mocker.patch("mips_api._s3_cache_read", autospec=True, side_effect=Exception)
-
-    # assert empty chart of accounts raises a ValueError
+    # assert that we raise a ValueError
     with pytest.raises(ValueError):
-        mips_api.collect_chart(org_name, mock_secrets, s3_bucket, s3_path)
-
-    # assert logout is called when an exception is raised
-    assert logout_mock.call_count == 2
+        found_dict = mips_api.chart_cache(org_name, mock_secrets, s3_bucket, s3_path)
 
 
 @pytest.mark.parametrize(
@@ -560,9 +598,9 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     # mock out collect_secrets() with mock secrets
     mocker.patch("mips_api.collect_secrets", autospec=True, return_value=mock_secrets)
 
-    # mock out collect_chart() with mock chart
+    # mock out chart_cache() with mock chart
     mocker.patch(
-        "mips_api.collect_chart", autospec=True, return_value=expected_mips_dict_raw
+        "mips_api.chart_cache", autospec=True, return_value=expected_mips_dict_raw
     )
 
     # test event

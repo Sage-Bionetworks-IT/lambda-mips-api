@@ -9,7 +9,7 @@ from requests.exceptions import RequestException
 from urllib3.exceptions import RequestError
 
 LOG = logging.getLogger(__name__)
-LOG.setLevel(logging.INFO)
+LOG.setLevel(logging.DEBUG)
 
 _mips_url_login = "https://login.mip.com/api/v1/sso/mipadv/login"
 _mips_url_coa_segments = "https://api.mip.com/api/coa/segments"
@@ -216,43 +216,13 @@ def _request_logout(access_token):
     )
 
 
-def _s3_cache_read(bucket, path):
+def _upstream_requests(org_name, secrets):
     """
-    Read MIP response from S3 cache object
-    """
-    global s3_client
-    if s3_client is None:
-        s3_client = boto3.client("s3")
-
-    data = s3_client.get_object(Bucket=bucket, Key=path)
-    return json.loads(data["Body"].read())
-
-
-def _s3_cache_write(data, bucket, path):
-    """
-    Write MIP response to S3 cache object
-    """
-    global s3_client
-    if s3_client is None:
-        s3_client = boto3.client("s3")
-
-    body = json.dumps(data)
-    s3_client.put_object(Bucket=bucket, Key=path, Body=body)
-
-
-def collect_chart(org_name, secrets, bucket, path):
-    """
-    Access the Chart of Accounts from MIP Cloud, and implement a write-through
-    cache of successful responses to tolerate long-term faults in the upstream
-    API.
-
-    A successful API response will be stored in S3 indefinitely, to be retrieved
-    and used in the case of an API failure.
+    Log into MIPS, get the chart of accounts, and log out
     """
 
     mips_dict = {}
     access_token = None
-    timeout = 5
 
     mips_creds = {
         "username": secrets["user"],
@@ -282,25 +252,87 @@ def collect_chart(org_name, secrets, bucket, path):
             except Exception as exc:
                 LOG.exception("Error logging out")
 
-    if mips_dict:
-        # store write-through cache
-        LOG.debug("Write chart of accounts to S3")
-        try:
-            _s3_cache_write(mips_dict, bucket, path)
-        except Exception as exc:
-            LOG.exception("S3 write failure")
-    else:
-        # read cached value
-        LOG.debug("Read cached chart of accounts from S3")
-        try:
-            mips_dict = _s3_cache_read(bucket, path)
-        except Exception as exc:
-            LOG.exception("S3 read failure")
+    return mips_dict
 
-    if not mips_dict:
+
+def _s3_cache_read(bucket, path):
+    """
+    Read MIP response from S3 cache object
+    """
+    global s3_client
+    if s3_client is None:
+        s3_client = boto3.client("s3")
+
+    data = s3_client.get_object(Bucket=bucket, Key=path)
+    return json.loads(data["Body"].read())
+
+
+def _s3_cache_write(data, bucket, path):
+    """
+    Write MIP response to S3 cache object
+    """
+    global s3_client
+    if s3_client is None:
+        s3_client = boto3.client("s3")
+
+    body = json.dumps(data)
+    s3_client.put_object(Bucket=bucket, Key=path, Body=body)
+
+
+def chart_cache(org_name, secrets, bucket, path):
+    """
+    Access the Chart of Accounts from MIP Cloud, and implement a write-through
+    cache of successful responses to tolerate long-term faults in the upstream
+    API.
+
+    A successful API response will be stored in S3 indefinitely, to be retrieved
+    and used in the case of an API failure.
+
+    The S3 bucket has versioning enabled for disaster recovery, but this means
+    that every PUT request will create a new S3 object. In order to minimize
+    the number of objects in the bucket, read the cache value on every run and
+    only update the S3 object if it changes.
+    """
+
+    coa_dict = None
+    cache_dict = None
+
+    # get the upstream API response
+    LOG.info("Read chart of accounts from upstream API")
+    upstream_dict = _upstream_requests(org_name, secrets)
+    LOG.debug(f"Upstream API response: {upstream_dict}")
+
+    # always read cached value
+    LOG.info("Read cached chart of accounts from S3")
+    try:
+        cache_dict = _s3_cache_read(bucket, path)
+        LOG.debug(f"Cached API response: {cache_dict}")
+    except Exception as exc:
+        LOG.exception("S3 read failure")
+
+    if upstream_dict:
+        # if we received a non-empty response from the upstream API, compare it
+        # to our cached response and update the S3 write-through cache if needed
+        if upstream_dict == cache_dict:
+            LOG.debug("No change in chart of accounts")
+        else:
+            # store write-through cache
+            LOG.info("Write updated chart of accounts to S3")
+            try:
+                _s3_cache_write(upstream_dict, bucket, path)
+            except Exception as exc:
+                LOG.exception("S3 write failure")
+        coa_dict = upstream_dict
+    else:
+        # no response (or an empty response) from the upstream API,
+        # rely on our response cached in S3.
+        coa_dict = cache_dict
+
+    if not coa_dict:
+        # make sure we don't return an empty value
         raise ValueError("No valid chart of accounts found")
 
-    return mips_dict
+    return coa_dict
 
 
 def process_chart(params, chart_dict, omit_list, other, no_program):
@@ -461,7 +493,7 @@ def lambda_handler(event, context):
         ssm_secrets = collect_secrets(ssm_path)
 
         # get chart of accounts from mips
-        raw_chart = collect_chart(mips_org, ssm_secrets, s3_bucket, s3_path)
+        raw_chart = chart_cache(mips_org, ssm_secrets, s3_bucket, s3_path)
         LOG.debug(f"Raw chart data: {raw_chart}")
 
         # collect query-string parameters

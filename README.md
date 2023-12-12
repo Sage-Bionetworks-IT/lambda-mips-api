@@ -64,8 +64,6 @@ The following template parameters are set as environment variables in the lambda
 | CodesToOmit        | CodesToOmit          | List of numeric codes to remove from output.       |
 | NoProgramCode      | NoProgramCode        | Numeric code to use for "No Program" entry.        |
 | OtherCode          | OtherCode            | Numeric code to use for "Other" entry.             |
-| CacheBucket        | CacheBucket          | Name of the S3 bucket created for the cache.       |
-| CacheBucketPath    | CacheBucketPath      | Path to the cache object in the S3 bucket.         |
 
 ### Query String Parameters
 
@@ -152,14 +150,25 @@ E.g.:
 
 ### CloudFront Cache
 
-This microservice is expected to be used less frequently than the 15-minute expiry for the lambda environments,
-which means most lambda runs will require a cold start.
-We also expect the third-party API data to change much less frequently than the microservice is called.
-And so we add a CloudFront cache to store the lambda responses,
-reducing our reliance on the third-party API and minimizing the impact of the lambda cold starts by calling the lambda less frequently.
+This microservice is expected to be used less frequently than the 15-minute
+expiry for the lambda environments, which means most lambda runs will require a
+cold start. We also expect the third-party API data to change much less
+frequently than the microservice is called. And so we add a CloudFront cache to
+store the lambda responses, reducing our reliance on the third-party API and
+minimizing the impact of the lambda cold starts by calling the lambda less
+frequently.
 
 If a bad response has been cached, it may need to be [manually invalidated through Cloudfront](https://aws.amazon.com/premiumsupport/knowledge-center/cloudfront-clear-cache/).
 
+### S3 Cache
+
+In addition to the web cache storing responses from the lambda itself, we also
+have a write-through cache of the upstream API responses implemented with an S3
+object in a versioned bucket. Bucket versioning allows us to recover from
+disaster by giving us the ability to revert to any previously cached API
+response after identifying new failure modes in the upstream API.
+
+For more information on S3 versioning, see [How S3 Versioning Works](https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html).
 
 ## Development
 
