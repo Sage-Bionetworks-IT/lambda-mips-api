@@ -60,6 +60,13 @@ Resources:
     Properties:
       VersioningConfiguration:
         Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: IntelligentTieringClassTransitionRule
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 3
+                StorageClass: INTELLIGENT_TIERING
 
   CacheBucketPolicy:
     Type: AWS::S3::BucketPolicy
