@@ -150,14 +150,28 @@ E.g.:
 
 ### CloudFront Cache
 
-This microservice is expected to be used less frequently than the 15-minute expiry for the lambda environments,
-which means most lambda runs will require a cold start.
-We also expect the third-party API data to change much less frequently than the microservice is called.
-And so we add a CloudFront cache to store the lambda responses,
-reducing our reliance on the third-party API and minimizing the impact of the lambda cold starts by calling the lambda less frequently.
+This lambda is expected to run less frequently than the 15-minute expiry for
+lambda environments, which means most lambda runs will require a cold start.
+We also expect the third-party API data to change much less frequently than the
+lambda is called. And so we add a CloudFront cache to store the lambda
+responses, reducing our reliance on the third-party API and minimizing the
+impact of the lambda cold starts by calling the lambda less frequently.
 
 If a bad response has been cached, it may need to be [manually invalidated through Cloudfront](https://aws.amazon.com/premiumsupport/knowledge-center/cloudfront-clear-cache/).
 
+### S3 Cache
+
+In addition to a web cache storing responses sent from the lambda, we also have
+a write-through cache of the successful responses received from the upstream API
+written to an S3 object in order to add fault tolerance in the event of upstream
+API failures. And bucket versioning for the cache object gives us the ability to
+access any previous successful upstream API responses, historic data that may be
+useful during disaster recovery. Alternatively, during upstream API outages any
+arbitrary cache object written to S3 by a cloud admin would be treated as
+authoritative upstream information.
+
+For more information on S3 versioning workflows, see [How S3 Versioning Works](https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html)
+and [Restoring Previous Versions](https://docs.aws.amazon.com/AmazonS3/latest/userguide/RestoringPreviousVersions.html).
 
 ## Development
 

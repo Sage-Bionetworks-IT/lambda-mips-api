@@ -55,6 +55,34 @@ Conditions:
   HasDnsNames: !Not [ !Equals [ !Join [ "", !Ref DnsNames ], "" ] ]
 
 Resources:
+  CacheBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: IntelligentTieringClassTransitionRule
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 3
+                StorageClass: INTELLIGENT_TIERING
+
+  CacheBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CacheBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Principal:
+              AWS: !GetAtt FunctionRole.Arn
+            Resource: !Sub "${CacheBucket.Arn}/*"
+
   Function:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
@@ -70,6 +98,8 @@ Resources:
           CodesToOmit: !Ref CodesToOmit
           NoProgramCode: !Ref NoProgramCode
           OtherCode: !Ref OtherCode
+          CacheBucket: !Ref CacheBucket
+          CacheBucketPath: 'mip/coa.json'
       Role: !GetAtt FunctionRole.Arn
       Events:
         ChartOfAccounts:
