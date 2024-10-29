@@ -88,7 +88,7 @@ Resources:
     Properties:
       CodeUri: .
       Handler: mips_api.lambda_handler
-      Runtime: python3.9
+      Runtime: python3.12
       Environment:
         Variables:
           ApiChartOfAccounts: '/accounts'
