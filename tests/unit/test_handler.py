@@ -95,6 +95,12 @@ mock_accounts = {
         },
         {
             "COA_SEGID": 1,
+            "COA_CODE": "34567800",
+            "COA_STATUS": "A",
+            "COA_TITLE": "(Special) Program",
+        },
+        {
+            "COA_SEGID": 1,
             "COA_CODE": "54321",
             "COA_STATUS": "A",
             "COA_TITLE": "Inactive",
@@ -126,6 +132,7 @@ expected_mips_dict_raw = {
     "12345600": "Program Part A",
     "12345601": "Program Part B",
     "23456700": "Other Program",
+    "34567800": "(Special) Program",
     "54321": "Inactive",
     "99030000": "Platform Infrastructure",
     "99990000": "Unfunded",
@@ -146,6 +153,7 @@ expected_mips_dict_processed = {
     "000000": "No Program",
     "123456": "Program Part A",
     "234567": "Other Program",
+    "345678": "Special Program",
     "990300": "Platform Infrastructure",
 }
 
@@ -154,12 +162,14 @@ expected_mips_dict_processed_other = {
     "000001": "Other",
     "123456": "Program Part A",
     "234567": "Other Program",
+    "345678": "Special Program",
     "990300": "Platform Infrastructure",
 }
 
 expected_mips_dict_processed_no = {
     "123456": "Program Part A",
     "234567": "Other Program",
+    "345678": "Special Program",
     "990300": "Platform Infrastructure",
 }
 
@@ -167,6 +177,7 @@ expected_mips_dict_processed_other_no = {
     "000001": "Other",
     "123456": "Program Part A",
     "234567": "Other Program",
+    "345678": "Special Program",
     "990300": "Platform Infrastructure",
 }
 
@@ -174,6 +185,7 @@ expected_mips_dict_processed_inactive = {
     "000000": "No Program",
     "123456": "Program Part A",
     "234567": "Other Program",
+    "345678": "Special Program",
     "54321": "Inactive",
     "990300": "Platform Infrastructure",
 }
@@ -188,6 +200,7 @@ expected_mips_dict_processed_priority_codes = {
     "54321": "Inactive",
     "123456": "Program Part A",
     "234567": "Other Program",
+    "345678": "Special Program",
     "990300": "Platform Infrastructure",
 }
 
@@ -196,6 +209,7 @@ expected_tag_list = [
     "No Program / 000000",
     "Program Part A / 123456",
     "Other Program / 234567",
+    "Special Program / 345678",
     "Platform Infrastructure / 990300",
 ]
 

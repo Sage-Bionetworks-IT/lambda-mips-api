@@ -362,9 +362,10 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
     priority_codes = _param_priority_list(params)
 
     # add short codes
-    for code, name in chart_dict.items():
+    for code, _name in chart_dict.items():
         if len(code) >= code_len:
             short = code[:6]  # ignore the last two digits on active codes
+            name = _name.replace("(", "").replace(")", "")  # remove parentheses
 
             if short in found_codes:
                 LOG.info(f"Code {short} has already been processed")
