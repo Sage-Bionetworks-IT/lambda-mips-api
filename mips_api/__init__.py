@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 
 import backoff
 import boto3
@@ -364,8 +365,14 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
     # add short codes
     for code, _name in chart_dict.items():
         if len(code) >= code_len:
-            short = code[:6]  # ignore the last two digits on active codes
-            name = _name.replace("(", "").replace(")", "")  # remove parentheses
+            # truncate active codes to the first 6 significant digits
+            short = code[:6]
+            # enforce AWS tags limitations
+            # https://docs.aws.amazon.com/tag-editor/latest/userguide/best-practices-and-strats.html
+            # enforce removing special characters globally for consistency,
+            # only enforce string limit when listing tag values because the string size will change.
+            regex = r"[^\d\w\s.:/=+\-@]+"
+            name = re.sub(regex, "", _name)
 
             if short in found_codes:
                 LOG.info(f"Code {short} has already been processed")
@@ -433,7 +440,11 @@ def list_tags(params, chart_dict):
 
     # build tags from chart of accounts
     for code, name in chart_dict.items():
-        tag = f"{name} / {code}"
+        # enforce AWS tags limitations
+        # https://docs.aws.amazon.com/tag-editor/latest/userguide/best-practices-and-strats.html
+        # max tag value length is 256, truncate
+        # only enforce when listing tag values
+        tag = f"{name[:245]} / {code[:6]}"
         tags.append(tag)
 
     limit = _param_limit_int(params)
