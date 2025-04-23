@@ -343,7 +343,7 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
 
     5-digit codes are inactive and should be ignored in most cases.
     8-digit codes are active, but only the first 6 digits are significant,
-    i.e. 12345601 and 12345602 should be deduplicated as 123456.
+      i.e. 12345601 and 12345602 should be deduplicated as 123456.
     """
 
     # deduplicate on shortened numeric codes
