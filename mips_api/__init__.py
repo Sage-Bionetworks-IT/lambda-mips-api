@@ -616,7 +616,7 @@ def process_balance(bal_dict, coa_dict):
     # check for success
     if "executionResult" not in bal_dict:
         LOG.error(f"No execution result found: '{bal_dict}'")
-        raise KeyError("No 'executionResult' found")
+        raise KeyError("No 'executionResult' key found")
 
     result = bal_dict["executionResult"]
     if result != "SUCCESS":
@@ -629,7 +629,8 @@ def process_balance(bal_dict, coa_dict):
     _detail = []
     for k, v in bal_dict["extraInformation"].items():
         if k != "Level1":
-            LOG.info(f"Unexpected key (not 'Level1'): {k}")
+            LOG.error(f"Unexpected key (not 'Level1'): {k}")
+            raise KeyError("No 'Level1' key found")
         else:
             _detail = v
 
@@ -669,6 +670,7 @@ def process_balance(bal_dict, coa_dict):
         name = None
         if k not in coa_dict:
             LOG.error(f"Key {k} not found in chart of accounts")
+            LOG.debug(f"List of keys: {coa_dict.keys()}")
             name = k
         else:
             name = coa_dict[k]
@@ -755,39 +757,46 @@ def lambda_handler(event, context):
         show_no_program = _param_show_no_program_bool(params)
         show_other = _param_show_other_bool(params)
 
-        # Process the chart of accounts from MIP, it's used in all cases
-        raw_chart = chart_cache(
-            mip_org,
-            ssm_secrets,
-            s3_bucket,
-            s3_chart_path,
-            hide_inactive,
-        )
-        LOG.debug(f"Raw chart data: {raw_chart}")
-        coa_chart = process_chart(
-            raw_chart,
-            omit_codes_list,
-            priority_codes,
-            hide_inactive,
-            code_other,
-            show_other,
-            code_no_program,
-            show_no_program,
-        )
-
         # parse the path and return appropriate data
         if "path" in event:
             event_path = event["path"]
 
             if event_path == api_routes["ApiTrialBalances"]:
+                raw_chart = chart_cache(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_chart_path,
+                    False,
+                )
+                LOG.debug(f"Raw chart data: {raw_chart}")
+
                 # Process current balances
                 raw_bal = balance_cache(
                     mip_org, ssm_secrets, s3_bucket, s3_balance_path
                 )
-                bal_csv = format_balance(raw_bal, coa_chart)
+                bal_csv = format_balance(raw_bal, raw_chart)
 
                 return _build_return_text(200, bal_csv)
             else:
+                raw_chart = chart_cache(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_chart_path,
+                    hide_inactive,
+                )
+                LOG.debug(f"Raw chart data: {raw_chart}")
+                coa_chart = process_chart(
+                    raw_chart,
+                    omit_codes_list,
+                    priority_codes,
+                    hide_inactive,
+                    code_other,
+                    show_other,
+                    code_no_program,
+                    show_no_program,
+                )
 
                 if event_path == api_routes["ApiChartOfAccounts"]:
                     # conditionally filter the output

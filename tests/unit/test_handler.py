@@ -149,6 +149,17 @@ mock_accounts = {
     ]
 }
 
+mock_balance_empty = {}
+
+mock_balance_invalid1 = {
+    "executionResult": "INVALID",
+}
+
+mock_balance_invalid2 = {
+    "executionResult": "SUCCESS",
+    "extraInformation": {"foo": "bar"},
+}
+
 mock_balance_success = {
     "executionResult": "SUCCESS",
     "extraInformation": {
@@ -163,7 +174,7 @@ mock_balance_success = {
                 "DBDETAIL_SUM_POSTEDAMT": mock_balance_start,
                 "DBDETAIL_SUM_SEGMENT_N0": "",
                 "DBDETAIL_SUM_SEGMENT_N1": "",
-                "DBDETAIL_SUM_SEGMENT_N2": "123456",
+                "DBDETAIL_SUM_SEGMENT_N2": "12345600",
                 "DBDETAIL_SUM_SEGMENT_N3": "",
                 "DBDETAIL_SUM_SEGMENT_N4": "",
                 "DBDETAIL_SUM_SEGMENT_N5": "",
@@ -180,7 +191,7 @@ mock_balance_success = {
                 "DBDETAIL_SUM_POSTEDAMT": mock_balance_activity,
                 "DBDETAIL_SUM_SEGMENT_N0": "",
                 "DBDETAIL_SUM_SEGMENT_N1": "",
-                "DBDETAIL_SUM_SEGMENT_N2": "123456",
+                "DBDETAIL_SUM_SEGMENT_N2": "12345600",
                 "DBDETAIL_SUM_SEGMENT_N3": "",
                 "DBDETAIL_SUM_SEGMENT_N4": "",
                 "DBDETAIL_SUM_SEGMENT_N5": "",
@@ -197,7 +208,7 @@ mock_balance_success = {
                 "DBDETAIL_SUM_POSTEDAMT": mock_balance_end,
                 "DBDETAIL_SUM_SEGMENT_N0": "",
                 "DBDETAIL_SUM_SEGMENT_N1": "",
-                "DBDETAIL_SUM_SEGMENT_N2": "123456",
+                "DBDETAIL_SUM_SEGMENT_N2": "12345600",
                 "DBDETAIL_SUM_SEGMENT_N3": "",
                 "DBDETAIL_SUM_SEGMENT_N4": "",
                 "DBDETAIL_SUM_SEGMENT_N5": "",
@@ -345,7 +356,7 @@ expected_balance_rows = [
         "EndBalance",
     ],
     [
-        "123456",
+        "12345600",
         "Program Part A",
         expected_start_date,
         expected_end_date,
@@ -356,7 +367,7 @@ expected_balance_rows = [
 ]
 
 expected_balance_csv = f"""AccountNumber,AccountName,PeriodStart,PeriodEnd,StartBalance,Activity,EndBalance\r
-123456,Program Part A,{expected_start_date},{expected_end_date},{mock_balance_start},{mock_balance_activity},{mock_balance_end}\r
+12345600,Program Part A,{expected_start_date},{expected_end_date},{mock_balance_start},{mock_balance_activity},{mock_balance_end}\r
 """
 
 # mock query-string parameters
@@ -509,21 +520,18 @@ def test_bad_secrets(mocker):
 
 def test_requests(mocker, requests_mock):
     """
-    Test getting chart of accounts from upstream API
+    Test _chart_requests and _balance_requests
 
     Relies on `requests-mock.Mocker` fixture to inject mock `requests` responses.
     Because requests-mock creates a requests transport adapter, responses are
-    global and not thread-safe. Run tests sequentially to maintain control of
-    response order.
+    global (across all tests). Run all related assertions sequentially to maintain
+    control of the response order.
     """
 
     # inject mock responses into `requests`
     login_mock = requests_mock.post(mips_api._mip_url_login, json=mock_token)
     segment_mock = requests_mock.get(mips_api._mip_url_coa_segments, json=mock_segments)
     account_mock = requests_mock.get(mips_api._mip_url_coa_accounts, json=mock_accounts)
-    balance_mock = requests_mock.post(
-        mips_api._mip_url_current_balance, json=mock_balance_success
-    )
     logout_mock = requests_mock.post(mips_api._mip_url_logout)
 
     # also mock today's date
@@ -547,13 +555,14 @@ def test_requests(mocker, requests_mock):
     assert logout_mock.call_count == 1
 
     # get current balance from mip
+    balance_mock = requests_mock.post(
+        mips_api._mip_url_current_balance, json=mock_balance_success
+    )
     balance_dict = mips_api._balance_requests(mock_org_name, mock_secrets)
     assert balance_mock.call_count == 1
     assert balance_dict == mock_balance_success
 
-    # begin a second test with an alternate requests response
-
-    # inject new mock response with an Exception
+    # inject new mock response with an Exception for coa segments
     requests_mock.get(mips_api._mip_url_coa_segments, exc=Exception)
 
     # assert logout is called when an exception is raised
@@ -585,6 +594,40 @@ def test_cache_write(mocker):
 
         # assert no exception is raised
         mips_api._s3_cache_write(expected_coa_dict_raw, mock_s3_bucket, mock_s3_chart)
+
+
+@pytest.mark.parametrize(
+    "api_response,cache_response",
+    [
+        (mock_balance_success, None),
+        (None, mock_balance_success),
+        (mock_balance_success, mock_balance_success),
+    ],
+)
+def test_balance_cache(mocker, api_response, cache_response):
+    """Test balance_cache() with no upstream response"""
+    mocker.patch(
+        "mips_api._balance_requests",
+        autospec=True,
+        return_value=api_response,
+    )
+    mocker.patch(
+        "mips_api._s3_cache_read",
+        autospec=True,
+        return_value=cache_response,
+    )
+    mocker.patch(
+        "mips_api._s3_cache_write",
+        autospec=True,
+    )
+
+    found_dict = mips_api.balance_cache(
+        mock_org_name,
+        mock_secrets,
+        mock_s3_bucket,
+        mock_s3_chart,
+    )
+    assert found_dict == mock_balance_success
 
 
 @pytest.mark.parametrize(
@@ -725,6 +768,24 @@ def test_process_chart(
 
 
 @pytest.mark.parametrize(
+    "bal_dict, coa_dict, fail",
+    [
+        (mock_balance_empty, expected_coa_dict_full, True),
+        (mock_balance_invalid1, expected_coa_dict_full, True),
+        (mock_balance_invalid2, expected_coa_dict_full, True),
+        (mock_balance_success, expected_coa_dict_full, False),
+    ],
+)
+def test_process_balance(bal_dict, coa_dict, fail):
+    if fail:
+        with pytest.raises(Exception):
+            mips_api.process_balance(bal_dict, coa_dict)
+    else:
+        found_rows = mips_api.process_balance(bal_dict, coa_dict)
+        assert found_rows == expected_balance_rows
+
+
+@pytest.mark.parametrize(
     "params,expected_bool",
     [
         ({}, False),
@@ -820,7 +881,7 @@ def test_lambda_handler_no_env(invalid_event):
     assert ret["statusCode"] == 500
 
 
-def _test_with_env(mocker, event, code, body=None, error=None, use_json=True):
+def _test_with_env(mocker, event, code, body=None, error=None, text=None):
     """Keep lambda_handler tests DRY"""
 
     # mock environment variables
@@ -860,16 +921,17 @@ def _test_with_env(mocker, event, code, body=None, error=None, use_json=True):
     ret = mips_api.lambda_handler(event, None)
     assert ret["statusCode"] == code
 
-    if use_json:
+    if text is not None:
+        assert ret["body"] == text
+
+    else:
         json_body = json.loads(ret["body"])
+
+        if body is not None:
+            assert json_body == body
 
         if error is not None:
             assert json_body["error"] == error
-
-        elif body is not None:
-            assert json_body == body
-    else:
-        assert ret["body"] == body
 
 
 def test_lambda_handler_invalid_path(invalid_event, mocker):
@@ -904,9 +966,7 @@ def test_lambda_handler_accounts_priority(accounts_priority_event, mocker):
 def test_lambda_handler_balance(balances_event, mocker):
     """Test tag-list event"""
 
-    _test_with_env(
-        mocker, balances_event, 200, body=expected_balance_csv, use_json=False
-    )
+    _test_with_env(mocker, balances_event, 200, text=expected_balance_csv)
 
 
 def test_lambda_handler_tags(tags_event, mocker):
