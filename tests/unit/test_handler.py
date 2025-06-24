@@ -4,6 +4,7 @@ import mips_api
 
 import json
 import os
+from datetime import date
 
 import boto3
 import pytest
@@ -28,6 +29,14 @@ mock_no_program_code = "000000"
 mock_s3_bucket = "test-bucket"
 mock_s3_chart = "test-coa.json"
 mock_s3_balance = "test-balance.json"
+
+mock_date = date(2025, 5, 5)
+expected_start_date = "04/01/2025"
+expected_end_date = "05/01/2025"
+
+mock_balance_start = 9001.01
+mock_balance_activity = 101.01
+mock_balance_end = 9102.02
 
 expected_omit_codes = [
     "999900",
@@ -77,7 +86,12 @@ expected_segid = 1
 
 mock_accounts = {
     "COA_SEGID": [
-        {"COA_SEGID": 0, "COA_CODE": "1", "COA_STATUS": "A", "COA_TITLE": "Direct"},
+        {
+            "COA_SEGID": 0,
+            "COA_CODE": "1",
+            "COA_STATUS": "A",
+            "COA_TITLE": "Direct",
+        },
         {
             "COA_SEGID": 1,
             "COA_CODE": "12345600",
@@ -135,6 +149,66 @@ mock_accounts = {
     ]
 }
 
+mock_balance_success = {
+    "executionResult": "SUCCESS",
+    "extraInformation": {
+        "Level1": [
+            {
+                "DBDETAIL_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 1,
+                "DBDETAIL_SUM_DESC": "Beginning Balance",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_start,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_start,
+                "DBDETAIL_SUM_SEGMENT_N0": "",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "123456",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+            {
+                "DBDETAIL_SUM_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 2,
+                "DBDETAIL_SUM_DESC": "Current Activity",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_activity,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_activity,
+                "DBDETAIL_SUM_SEGMENT_N0": "",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "123456",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+            {
+                "DBDETAIL_SUM_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 3,
+                "DBDETAIL_SUM_DESC": "Ending Balance",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_end,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_end,
+                "DBDETAIL_SUM_SEGMENT_N0": "",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "123456",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+        ]
+    },
+    "period_from": expected_start_date,
+    "period_to": expected_end_date,
+}
 
 # expected default internal dictionary
 expected_coa_dict_raw = {
@@ -260,13 +334,38 @@ expected_tag_list_limit = [
     "Program Part A / 123456",
 ]
 
+expected_balance_rows = [
+    [
+        "AccountNumber",
+        "AccountName",
+        "PeriodStart",
+        "PeriodEnd",
+        "StartBalance",
+        "Activity",
+        "EndBalance",
+    ],
+    [
+        "123456",
+        "Program Part A",
+        expected_start_date,
+        expected_end_date,
+        mock_balance_start,
+        mock_balance_activity,
+        mock_balance_end,
+    ],
+]
+
+expected_balance_csv = f"""AccountNumber,AccountName,PeriodStart,PeriodEnd,StartBalance,Activity,EndBalance\r
+123456,Program Part A,{expected_start_date},{expected_end_date},{mock_balance_start},{mock_balance_activity},{mock_balance_end}\r
+"""
+
 # mock query-string parameters
 mock_foo_param = {"foo": "bar"}
 mock_limit = 2
 mock_limit_param = {"limit": mock_limit}
 mock_other_param = {"show_other_code": "true"}
 mock_priority_codes_str = "54321,234567"
-mock_priority_codes_list = ["54321,234567"]
+mock_priority_codes_list = ["54321", "234567"]
 mock_priority_param = {"priority_codes": mock_priority_codes_str}
 mock_inactive_param = {"show_inactive_codes": "true"}
 mock_no_program_param = {"hide_no_program_code": "true"}
@@ -342,8 +441,18 @@ def accounts_event():
 
 
 @pytest.fixture()
+def accounts_priority_event():
+    return apigw_event(mock_api_accounts, qsp=mock_priority_param)
+
+
+@pytest.fixture()
 def tags_event():
     return apigw_event(mock_api_tags)
+
+
+@pytest.fixture()
+def balances_event():
+    return apigw_event(mock_api_balance)
 
 
 @pytest.fixture()
@@ -398,7 +507,7 @@ def test_bad_secrets(mocker):
             secrets = mips_api.collect_secrets(mock_ssm_path)
 
 
-def test_upstream_chart(requests_mock):
+def test_requests(mocker, requests_mock):
     """
     Test getting chart of accounts from upstream API
 
@@ -412,7 +521,18 @@ def test_upstream_chart(requests_mock):
     login_mock = requests_mock.post(mips_api._mip_url_login, json=mock_token)
     segment_mock = requests_mock.get(mips_api._mip_url_coa_segments, json=mock_segments)
     account_mock = requests_mock.get(mips_api._mip_url_coa_accounts, json=mock_accounts)
+    balance_mock = requests_mock.post(
+        mips_api._mip_url_current_balance, json=mock_balance_success
+    )
     logout_mock = requests_mock.post(mips_api._mip_url_logout)
+
+    # also mock today's date
+    # we need to mock the entire module because it's written in C
+    mipdate_mock = mocker.patch(
+        "mips_api.date",
+        autospec=True,
+    )
+    mipdate_mock.today.return_value = mock_date
 
     # get chart of accounts from mip
     coa_dict = mips_api._chart_requests(mock_org_name, mock_secrets, False)
@@ -426,14 +546,20 @@ def test_upstream_chart(requests_mock):
     assert account_mock.call_count == 1
     assert logout_mock.call_count == 1
 
+    # get current balance from mip
+    balance_dict = mips_api._balance_requests(mock_org_name, mock_secrets)
+    assert balance_mock.call_count == 1
+    assert balance_dict == mock_balance_success
+
     # begin a second test with an alternate requests response
 
     # inject new mock response with an Exception
     requests_mock.get(mips_api._mip_url_coa_segments, exc=Exception)
 
     # assert logout is called when an exception is raised
-    mips_api._chart_requests(mock_org_name, mock_secrets, False)
     assert logout_mock.call_count == 2
+    mips_api._chart_requests(mock_org_name, mock_secrets, False)
+    assert logout_mock.call_count == 3
 
 
 def test_cache_read(mocker):
@@ -469,7 +595,7 @@ def test_cache_write(mocker):
         (expected_coa_dict_raw, expected_coa_dict_raw),
     ],
 )
-def test_chart(mocker, chart_response, cache_response):
+def test_chart_cache(mocker, chart_response, cache_response):
     """Test chart_cache() with no upstream response"""
     mocker.patch(
         "mips_api._chart_requests",
@@ -487,7 +613,11 @@ def test_chart(mocker, chart_response, cache_response):
     )
 
     found_dict = mips_api.chart_cache(
-        mock_ssm_params, mock_org_name, mock_secrets, mock_s3_bucket, mock_s3_chart
+        mock_org_name,
+        mock_secrets,
+        mock_s3_bucket,
+        mock_s3_chart,
+        True,
     )
     assert found_dict == expected_coa_dict_raw
 
@@ -535,9 +665,21 @@ def test_parse_codes(code_str, code_list):
     "priority_codes,hide_inactive,show_other,show_no_program,expected_dict",
     [
         ([], True, False, True, expected_coa_dict_processed),  # default values
-        ([], True, False, False, expected_coa_dict_processed_no),  # hide no program
+        (
+            [],
+            True,
+            False,
+            False,
+            expected_coa_dict_processed_no,
+        ),  # hide no program
         ([], True, True, True, expected_coa_dict_processed_other),  # show other
-        ([], False, False, True, expected_coa_dict_processed_inactive),  # show inactive
+        (
+            [],
+            False,
+            False,
+            True,
+            expected_coa_dict_processed_inactive,
+        ),  # show inactive
         (
             [],
             False,
@@ -623,7 +765,19 @@ def test_param_limit_int(params, expected_int):
 )
 def test_param_limit_int_err(params):
     with pytest.raises(ValueError):
-        found_limit_int = mips_api._param_limit_int(params)
+        mips_api._param_limit_int(params)
+
+
+@pytest.mark.parametrize(
+    "params,expected_codes",
+    [
+        ("", []),
+        (mock_priority_codes_str, mock_priority_codes_list),
+    ],
+)
+def test_param_priority_codes(params, expected_codes):
+    found_codes = mips_api._parse_codes(params)
+    assert found_codes == expected_codes
 
 
 @pytest.mark.parametrize(
@@ -666,7 +820,7 @@ def test_lambda_handler_no_env(invalid_event):
     assert ret["statusCode"] == 500
 
 
-def _test_with_env(mocker, event, code, body=None, error=None):
+def _test_with_env(mocker, event, code, body=None, error=None, use_json=True):
     """Keep lambda_handler tests DRY"""
 
     # mock environment variables
@@ -688,22 +842,34 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     # mock out collect_secrets() with mock secrets
     mocker.patch("mips_api.collect_secrets", autospec=True, return_value=mock_secrets)
 
-    # mock out chart_cache() with mock chart
+    # mock out chart_cache() with mock response
     mocker.patch(
-        "mips_api.chart_cache", autospec=True, return_value=expected_coa_dict_raw
+        "mips_api.chart_cache",
+        autospec=True,
+        return_value=expected_coa_dict_raw,
+    )
+
+    # mock out balance_cache() with mock response
+    mocker.patch(
+        "mips_api.balance_cache",
+        autospec=True,
+        return_value=mock_balance_success,
     )
 
     # test event
     ret = mips_api.lambda_handler(event, None)
-    json_body = json.loads(ret["body"])
-
-    if error is not None:
-        assert json_body["error"] == error
-
-    elif body is not None:
-        assert json_body == body
-
     assert ret["statusCode"] == code
+
+    if use_json:
+        json_body = json.loads(ret["body"])
+
+        if error is not None:
+            assert json_body["error"] == error
+
+        elif body is not None:
+            assert json_body == body
+    else:
+        assert ret["body"] == body
 
 
 def test_lambda_handler_invalid_path(invalid_event, mocker):
@@ -722,6 +888,25 @@ def test_lambda_handler_accounts(accounts_event, mocker):
     """Test chart-of-accounts event"""
 
     _test_with_env(mocker, accounts_event, 200, body=expected_coa_dict_processed)
+
+
+def test_lambda_handler_accounts_priority(accounts_priority_event, mocker):
+    """Test chart-of-accounts event with priority codes"""
+
+    _test_with_env(
+        mocker,
+        accounts_priority_event,
+        200,
+        body=expected_coa_dict_processed_priority_codes,
+    )
+
+
+def test_lambda_handler_balance(balances_event, mocker):
+    """Test tag-list event"""
+
+    _test_with_env(
+        mocker, balances_event, 200, body=expected_balance_csv, use_json=False
+    )
 
 
 def test_lambda_handler_tags(tags_event, mocker):

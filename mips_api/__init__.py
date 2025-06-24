@@ -1,8 +1,11 @@
-from datetime import date
+import csv
+import io
 import json
 import logging
 import os
 import re
+from datetime import date
+
 
 import backoff
 import boto3
@@ -16,9 +19,6 @@ LOG.setLevel(logging.DEBUG)
 _mip_url_login = "https://login.mip.com/api/v1/sso/mipadv/login"
 _mip_url_coa_segments = "https://api.mip.com/api/coa/segments"
 _mip_url_coa_accounts = "https://api.mip.com/api/coa/segments/accounts"
-# _mip_url_current_balance = (
-#     "https://api.mip.com/api/v1/operations/balances/accounts/documents"
-# )
 _mip_url_current_balance = (
     "https://api.mip.com/api/model/CBODispBal/methods/GetAccountBalances"
 )
@@ -82,6 +82,21 @@ def _param_priority_list(params):
         return _parse_codes(params["priority_codes"])
 
     return None
+
+
+# helper functions to encapsulate the body, headers, and status code
+def _build_return_json(code, body):
+    return {
+        "statusCode": code,
+        "body": json.dumps(body, indent=2),
+    }
+
+
+def _build_return_text(code, body):
+    return {
+        "statusCode": code,
+        "body": body,
+    }
 
 
 def collect_secrets(ssm_path):
@@ -215,29 +230,6 @@ def _request_balance(access_token, period_from, period_to):
     timeout = 4
     LOG.info("Getting balances")
 
-    #     api_response = requests.get(
-    #         _mip_url_balance_template,
-    #         headers={"Authorization-Token": access_token},
-    #         timeout=timeout,
-    #     )
-    #     api_response.raise_for_status()
-    #     json_response = api_response.json()
-    #     LOG.debug(f"Raw balance template json: {json_response}")
-
-    #     body = {
-    #         "dateFrom": "03/01/2025",
-    #         "dateTo": "04/01/2025",
-    #         "segmentInformation": [
-    #             {
-    #                 "filterSelected": True,
-    #                 "filterItem": "PRG",
-    #                 "filterOperator": "<>",
-    #                 "filterCriteria1": "<Blank>",
-    #                 "filterCriteria2": "",
-    #             },
-    #         ],
-    #     }
-
     # copied from chrome dev tools while clicking through the web ui
     body = {
         "BOInformation": {
@@ -357,11 +349,11 @@ def _balance_requests(org_name, secrets):
 
     end = today.replace(day=1)  # first of this month
     end_str = end.strftime("%m/%d/%Y")
-    LOG.info(f"End day is {end}")
+    LOG.info(f"End day is {end_str}")
 
     start = end.replace(month=end.month - 1)
     start_str = start.strftime("%m/%d/%Y")  # first day of last month
-    LOG.info(f"Start day is {start}")
+    LOG.info(f"Start day is {start_str}")
 
     try:
         # get mip access token
@@ -376,6 +368,11 @@ def _balance_requests(org_name, secrets):
             _request_logout(access_token)
         except Exception as exc:
             LOG.exception("Error logging out")
+
+    bal_dict["period_from"] = start_str
+    bal_dict["period_to"] = end_str
+
+    LOG.debug(f"Balance dict: {bal_dict}")
 
     return bal_dict
 
@@ -457,17 +454,17 @@ def s3_cache(src_dict, bucket, path):
 
 def chart_cache(org_name, secrets, bucket, path, inactive):
     """
-    Access the Chart of Accounts from MIP Cloud, and implement a write-through
-    cache of successful responses to tolerate long-term faults in the upstream
-    API.
+    Access the Chart of Accounts from MIP Cloud, and implement a
+    write-through cache of successful responses to tolerate long-term
+    faults in the upstream API.
 
-    A successful API response will be stored in S3 indefinitely, to be retrieved
-    and used in the case of an API failure.
+    A successful API response will be stored in S3 indefinitely, to be
+    retrieved and used in the case of an API failure.
 
-    The S3 bucket has versioning enabled for disaster recovery, but this means
-    that every PUT request will create a new S3 object. In order to minimize
-    the number of objects in the bucket, read the cache value on every run and
-    only update the S3 object if it changes.
+    The S3 bucket has versioning enabled for disaster recovery, but this
+    means that every PUT request will create a new S3 object. In order
+    to minimize the number of objects in the bucket, read the cache
+    value on every run and only update the S3 object if it changes.
     """
 
     # get the upstream API response
@@ -539,11 +536,12 @@ def process_chart(
 
             if priority_codes is not None:
                 if short in priority_codes:
-                    # Since Python 3.7, python dictionaries preserve insertion
-                    # order, so to prepend an item to the top of the dictionary,
-                    # we create a new dictionary inserting the target code first,
-                    # then add the previous output, and finally save the new
-                    # dictionary as our output dictionary.
+                    # Since Python 3.7, python dictionaries preserve
+                    # insertion order, so to prepend an item to the top
+                    # of the dictionary, we create a new dictionary
+                    # inserting the target code first, then add the
+                    # previous output, and finally save the new
+                    # dictionary as our output.
                     new_chart = {short: name}
                     new_chart.update(out_chart)
                     out_chart = new_chart
@@ -613,12 +611,17 @@ def list_tags(chart_dict, limit):
         return tags
 
 
-def format_balance(bal_dict, coa_dict):
+def process_balance(bal_dict, coa_dict):
+
     # check for success
+    if "executionResult" not in bal_dict:
+        LOG.error(f"No execution result found: '{bal_dict}'")
+        raise KeyError("No 'executionResult' found")
+
     result = bal_dict["executionResult"]
     if result != "SUCCESS":
         LOG.error(f"Execution result is not 'SUCCESS': '{result}'")
-        raise ValueError
+        raise ValueError("Execution result is not 'SUCCESS'")
 
     # collate api response into a dict
     _data = {}
@@ -647,24 +650,25 @@ def format_balance(bal_dict, coa_dict):
     LOG.debug(f"Raw internal balance dict: {_data}")
 
     # List of rows in CSV
-    csv_out = []
+    out_rows = []
 
     # Add header row
     headers = [
         "AccountNumber",
         "AccountName",
-        "Period",
+        "PeriodStart",
+        "PeriodEnd",
         "StartBalance",
         "Activity",
         "EndBalance",
     ]
-    csv_out.append(headers)
+    out_rows.append(headers)
 
     # Generate rows from input dict
     for k, v in _data.items():
         name = None
         if k not in coa_dict:
-            LOG.error(f"Key {k} not found in coa dict")
+            LOG.error(f"Key {k} not found in chart of accounts")
             name = k
         else:
             name = coa_dict[k]
@@ -672,13 +676,26 @@ def format_balance(bal_dict, coa_dict):
         row = [
             k,
             name,
+            bal_dict["period_from"],
+            bal_dict["period_to"],
             v["balance_start"],
             v["activity"],
             v["balance_end"],
         ]
-        csv_out.append(row)
+        out_rows.append(row)
 
-    return csv_out
+    return out_rows
+
+
+def format_balance(bal_dict, coa_dict):
+    csv_out = io.StringIO()
+    csv_writer = csv.writer(csv_out)
+
+    csv_rows = process_balance(bal_dict, coa_dict)
+    for row in csv_rows:
+        csv_writer.writerow(row)
+
+    return csv_out.getvalue()
 
 
 def lambda_handler(event, context):
@@ -702,13 +719,6 @@ def lambda_handler(event, context):
 
         Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
     """
-
-    # helper functions to encapsulate the body, headers, and status code
-    def _build_return(code, body):
-        return {
-            "statusCode": code,
-            "body": json.dumps(body, indent=2),
-        }
 
     try:
         # collect environment variables
@@ -776,26 +786,26 @@ def lambda_handler(event, context):
                 )
                 bal_csv = format_balance(raw_bal, coa_chart)
 
-                return _build_return(200, bal_csv)
+                return _build_return_text(200, bal_csv)
             else:
 
                 if event_path == api_routes["ApiChartOfAccounts"]:
                     # conditionally filter the output
                     _coa_chart = limit_chart(coa_chart, limit_length)
-                    return _build_return(200, _coa_chart)
+                    return _build_return_json(200, _coa_chart)
 
                 elif event_path == api_routes["ApiValidTags"]:
                     # build a list of strings from the processed dictionary
                     valid_tags = list_tags(coa_chart, limit_length)
-                    return _build_return(200, valid_tags)
+                    return _build_return_json(200, valid_tags)
                 else:
-                    return _build_return(404, {"error": "Invalid request path"})
+                    return _build_return_json(404, {"error": "Invalid request path"})
 
         else:
-            return _build_return(
+            return _build_return_json(
                 400, {"error": f"Invalid event: No path found: {event}"}
             )
 
     except Exception as exc:
         LOG.exception(exc)
-        return _build_return(500, {"error": str(exc)})
+        return _build_return_json(500, {"error": str(exc)})
