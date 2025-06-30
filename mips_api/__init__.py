@@ -334,26 +334,45 @@ def _chart_requests(org_name, secrets, hide_inactive):
     return coa_dict
 
 
+def _balance_dates():
+    today = date.today()
+    LOG.info(f"Today is {today}")
+
+    if today.day < 7:
+        # at the beginning of the month, look at last month
+        end = today.replace(day=1)  # first of this month
+        start = end.replace(month=end.month - 1)  # first day of last month
+
+        end_str = end.strftime("%m/%d/%Y")
+        start_str = start.strftime("%m/%d/%Y")
+
+        LOG.info(f"Start day is {start_str}")
+        LOG.info(f"End day is {end_str}")
+
+        return start_str, end_str
+    else:
+        # otherwise look at month-to-date
+        start = today.replace(day=1)  # first of this month
+        end_str = today.strftime("%m/%d/%Y")
+        start_str = start.strftime("%m/%d/%Y")
+
+        LOG.info(f"Start day is {start_str}")
+        LOG.info(f"End day is {end_str}")
+
+        return start_str, end_str
+
+
 def _balance_requests(org_name, secrets):
     bal_dict = {}
     access_token = None
+
+    start_str, end_str = _balance_dates()
 
     mip_creds = {
         "username": secrets["user"],
         "password": secrets["pass"],
         "org": org_name,
     }
-
-    today = date.today()
-    LOG.info(f"Today is {today}")
-
-    end = today.replace(day=1)  # first of this month
-    end_str = end.strftime("%m/%d/%Y")
-    LOG.info(f"End day is {end_str}")
-
-    start = end.replace(month=end.month - 1)
-    start_str = start.strftime("%m/%d/%Y")  # first day of last month
-    LOG.info(f"Start day is {start_str}")
 
     try:
         # get mip access token
