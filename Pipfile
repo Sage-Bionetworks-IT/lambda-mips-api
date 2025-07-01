@@ -4,12 +4,13 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 
 [dev-packages]
-pytest = "~=8.1"
-pytest-mock = "~=3.8"
-requests-mock = "~=1.10"
-pre-commit = "~=4.0"
+pytest = "*"
+pytest-mock = "*"
+requests-mock = "*"
+pre-commit = "*"
 boto3 = "~=1.24"
-coverage = "~=7.6"
+coverage = "*"
+black = "*"
 
 [packages]
 requests = "~=2.0"

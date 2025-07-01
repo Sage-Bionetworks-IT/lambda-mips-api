@@ -4,6 +4,7 @@ import mips_api
 
 import json
 import os
+from datetime import date
 
 import boto3
 import pytest
@@ -13,18 +14,29 @@ from botocore.stub import Stubber
 # fixtures that don't need a setup function
 
 # environment variables
-api_accounts = "/test/accounts"
-api_tags = "/test/tags"
-org_name = "testOrg"
-ssm_path = "secret/path"
-omit_codes = "999900,999800"
-other_code = "000001"
-no_program_code = "000000"
-s3_bucket = "test-bucket"
-s3_path = "test-path"
+mock_api_accounts = "/test/accounts"
+mock_api_balance = "/test/balance"
+mock_api_tags = "/test/tags"
+mock_api_invalid = "/test/invalid"
 
-# neither api_accounts nor api_tags
-api_invalid = "/test/invalid"
+mock_org_name = "testOrg"
+mock_ssm_path = "secret/path"
+
+mock_omit_codes = "999900,999800"
+mock_other_code = "000001"
+mock_no_program_code = "000000"
+
+mock_s3_bucket = "test-bucket"
+mock_s3_chart = "test-coa.json"
+mock_s3_balance = "test-balance.json"
+
+mock_date = date(2025, 5, 5)
+expected_start_date = "04/01/2025"
+expected_end_date = "05/01/2025"
+
+mock_balance_start = 9001.01
+mock_balance_activity = 101.01
+mock_balance_end = 9102.02
 
 expected_omit_codes = [
     "999900",
@@ -74,7 +86,12 @@ expected_segid = 1
 
 mock_accounts = {
     "COA_SEGID": [
-        {"COA_SEGID": 0, "COA_CODE": "1", "COA_STATUS": "A", "COA_TITLE": "Direct"},
+        {
+            "COA_SEGID": 0,
+            "COA_CODE": "1",
+            "COA_STATUS": "A",
+            "COA_TITLE": "Direct",
+        },
         {
             "COA_SEGID": 1,
             "COA_CODE": "12345600",
@@ -109,7 +126,7 @@ mock_accounts = {
             "COA_SEGID": 1,
             "COA_CODE": "54321",
             "COA_STATUS": "A",
-            "COA_TITLE": "Inactive",
+            "COA_TITLE": "Inactive Short",
         },
         {
             "COA_SEGID": 1,
@@ -125,38 +142,120 @@ mock_accounts = {
         },
         {
             "COA_SEGID": 1,
-            "COA_CODE": "76543200",
+            "COA_CODE": "65432100",
             "COA_STATUS": "I",
-            "COA_TITLE": "Ignored",
+            "COA_TITLE": "Inactive MIP",
         },
     ]
 }
 
+mock_balance_empty = {}
 
-# expected internal dictionary
-expected_mips_dict_raw = {
+mock_balance_invalid1 = {
+    "executionResult": "INVALID",
+}
+
+mock_balance_invalid2 = {
+    "executionResult": "SUCCESS",
+    "extraInformation": {"foo": "bar"},
+}
+
+mock_balance_success = {
+    "executionResult": "SUCCESS",
+    "extraInformation": {
+        "Level1": [
+            {
+                "DBDETAIL_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 1,
+                "DBDETAIL_SUM_DESC": "Beginning Balance",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_start,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_start,
+                "DBDETAIL_SUM_SEGMENT_N0": "",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "12345600",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+            {
+                "DBDETAIL_SUM_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 2,
+                "DBDETAIL_SUM_DESC": "Current Activity",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_activity,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_activity,
+                "DBDETAIL_SUM_SEGMENT_N0": "",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "12345600",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+            {
+                "DBDETAIL_SUM_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 3,
+                "DBDETAIL_SUM_DESC": "Ending Balance",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_end,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_end,
+                "DBDETAIL_SUM_SEGMENT_N0": "",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "12345600",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+        ]
+    },
+    "period_from": expected_start_date,
+    "period_to": expected_end_date,
+}
+
+# expected default internal dictionary
+expected_coa_dict_raw = {
     "12345600": "Program Part A",
     "12345601": "Program Part B",
     "23456700": "Other Program",
     "34567800": "(Special: @Symbols!) Program",
     "45678900": "Long Program " + ("X" * 300),
-    "54321": "Inactive",
+    "54321": "Inactive Short",
     "99030000": "Platform Infrastructure",
     "99990000": "Unfunded",
 }
 
+# expected internal dictionary with inactive programs
+expected_coa_dict_full = {
+    "12345600": "Program Part A",
+    "12345601": "Program Part B",
+    "23456700": "Other Program",
+    "34567800": "(Special: @Symbols!) Program",
+    "45678900": "Long Program " + ("X" * 300),
+    "54321": "Inactive Short",
+    "65432100": "Inactive MIP",
+    "99030000": "Platform Infrastructure",
+    "99990000": "Unfunded",
+}
 
-mock_s3_get_response = {"Body": io.BytesIO(json.dumps(expected_mips_dict_raw).encode())}
+mock_s3_get_response = {"Body": io.BytesIO(json.dumps(expected_coa_dict_raw).encode())}
 
 mock_s3_put_response = {}
 
-
-expected_mips_dict_raw_limit = {
+expected_coa_dict_raw_limit = {
     "12345600": "Program Part A",
     "12345601": "Program Part B",
 }
 
-expected_mips_dict_processed = {
+expected_coa_dict_processed = {
     "000000": "No Program",
     "123456": "Program Part A",
     "234567": "Other Program",
@@ -165,7 +264,7 @@ expected_mips_dict_processed = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_other = {
+expected_coa_dict_processed_other = {
     "000000": "No Program",
     "000001": "Other",
     "123456": "Program Part A",
@@ -175,7 +274,7 @@ expected_mips_dict_processed_other = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_no = {
+expected_coa_dict_processed_no = {
     "123456": "Program Part A",
     "234567": "Other Program",
     "345678": "Special: @Symbols Program",
@@ -183,37 +282,50 @@ expected_mips_dict_processed_no = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_other_no = {
+expected_coa_dict_processed_other_inactive = {
+    "000000": "No Program",
     "000001": "Other",
     "123456": "Program Part A",
     "234567": "Other Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
+    "54321": "Inactive Short",
+    "654321": "Inactive MIP",
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_inactive = {
+expected_coa_dict_processed_inactive = {
     "000000": "No Program",
     "123456": "Program Part A",
     "234567": "Other Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
-    "54321": "Inactive",
+    "54321": "Inactive Short",
+    "654321": "Inactive MIP",
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_limit = {
+expected_coa_dict_processed_limit = {
     "000000": "No Program",
     "123456": "Program Part A",
 }
 
-expected_mips_dict_processed_priority_codes = {
+expected_coa_dict_processed_priority_codes = {
     "000000": "No Program",
-    "54321": "Inactive",
-    "123456": "Program Part A",
     "234567": "Other Program",
+    "123456": "Program Part A",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
+    "990300": "Platform Infrastructure",
+}
+
+expected_coa_dict_processed_priority_codes_inactive = {
+    "54321": "Inactive Short",
+    "234567": "Other Program",
+    "123456": "Program Part A",
+    "345678": "Special: @Symbols Program",
+    "456789": "Long Program " + ("X" * 300),
+    "654321": "Inactive MIP",
     "990300": "Platform Infrastructure",
 }
 
@@ -233,17 +345,48 @@ expected_tag_list_limit = [
     "Program Part A / 123456",
 ]
 
+expected_balance_rows = [
+    [
+        "AccountNumber",
+        "AccountName",
+        "PeriodStart",
+        "PeriodEnd",
+        "StartBalance",
+        "Activity",
+        "EndBalance",
+    ],
+    [
+        "12345600",
+        "Program Part A",
+        expected_start_date,
+        expected_end_date,
+        mock_balance_start,
+        mock_balance_activity,
+        mock_balance_end,
+    ],
+]
+
+expected_balance_csv = f"""AccountNumber,AccountName,PeriodStart,PeriodEnd,StartBalance,Activity,EndBalance\r
+12345600,Program Part A,{expected_start_date},{expected_end_date},{mock_balance_start},{mock_balance_activity},{mock_balance_end}\r
+"""
+
 # mock query-string parameters
 mock_foo_param = {"foo": "bar"}
-mock_limit_param = {"limit": "2"}
+mock_limit = 2
+mock_limit_param = {"limit": mock_limit}
 mock_other_param = {"show_other_code": "true"}
-mock_priority_param = {"priority_codes": "54321"}
+mock_priority_codes_str = "54321,234567"
+mock_priority_codes_list = ["54321", "234567"]
+mock_priority_param = {"priority_codes": mock_priority_codes_str}
 mock_inactive_param = {"show_inactive_codes": "true"}
 mock_no_program_param = {"hide_no_program_code": "true"}
 
 
-def apigw_event(path, qsp={"foo": "bar"}):
+def apigw_event(path, qsp=None):
     """Generates API GW Event"""
+
+    if qsp is None:
+        qsp = {"foo": "bar"}
 
     return {
         "body": '{ "test": "body"}',
@@ -300,22 +443,32 @@ def apigw_event(path, qsp={"foo": "bar"}):
 
 @pytest.fixture()
 def invalid_event():
-    return apigw_event(api_invalid)
+    return apigw_event(mock_api_invalid)
 
 
 @pytest.fixture()
 def accounts_event():
-    return apigw_event(api_accounts)
+    return apigw_event(mock_api_accounts)
+
+
+@pytest.fixture()
+def accounts_priority_event():
+    return apigw_event(mock_api_accounts, qsp=mock_priority_param)
 
 
 @pytest.fixture()
 def tags_event():
-    return apigw_event(api_tags)
+    return apigw_event(mock_api_tags)
+
+
+@pytest.fixture()
+def balances_event():
+    return apigw_event(mock_api_balance)
 
 
 @pytest.fixture()
 def tags_limit_event():
-    return apigw_event(api_tags, qsp=mock_limit_param)
+    return apigw_event(mock_api_tags, qsp=mock_limit_param)
 
 
 def test_secrets(mocker):
@@ -329,7 +482,7 @@ def test_secrets(mocker):
         _stub.add_response("get_parameters_by_path", mock_ssm_params)
 
         # assert secrets were collected
-        secrets = mips_api.collect_secrets(ssm_path)
+        secrets = mips_api.collect_secrets(mock_ssm_path)
         assert secrets == mock_secrets
 
 
@@ -347,7 +500,7 @@ def test_no_secrets(mocker):
 
         # assert Exception is raised
         with pytest.raises(Exception):
-            secrets = mips_api.collect_secrets(ssm_path)
+            secrets = mips_api.collect_secrets(mock_ssm_path)
 
 
 def test_bad_secrets(mocker):
@@ -362,34 +515,38 @@ def test_bad_secrets(mocker):
 
         # assert Exception is raised
         with pytest.raises(Exception):
-            secrets = mips_api.collect_secrets(ssm_path)
+            secrets = mips_api.collect_secrets(mock_ssm_path)
 
 
-def test_upstream(mocker, requests_mock):
+def test_requests(mocker, requests_mock):
     """
-    Test getting chart of accounts from upstream API
+    Test _chart_requests and _balance_requests
 
     Relies on `requests-mock.Mocker` fixture to inject mock `requests` responses.
     Because requests-mock creates a requests transport adapter, responses are
-    global and not thread-safe. Run two tests sequentially to maintain control
-    over response order.
+    global (across all tests). Run all related assertions sequentially to maintain
+    control of the response order.
     """
 
     # inject mock responses into `requests`
-    login_mock = requests_mock.post(mips_api._mips_url_login, json=mock_token)
-    segment_mock = requests_mock.get(
-        mips_api._mips_url_coa_segments, json=mock_segments
-    )
-    account_mock = requests_mock.get(
-        mips_api._mips_url_coa_accounts, json=mock_accounts
-    )
-    logout_mock = requests_mock.post(mips_api._mips_url_logout)
+    login_mock = requests_mock.post(mips_api._mip_url_login, json=mock_token)
+    segment_mock = requests_mock.get(mips_api._mip_url_coa_segments, json=mock_segments)
+    account_mock = requests_mock.get(mips_api._mip_url_coa_accounts, json=mock_accounts)
+    logout_mock = requests_mock.post(mips_api._mip_url_logout)
 
-    # get chart of accounts from mips
-    mips_dict = mips_api._upstream_requests(org_name, mock_secrets)
+    # also mock today's date
+    # we need to mock the entire module because it's written in C
+    mipdate_mock = mocker.patch(
+        "mips_api.date",
+        autospec=True,
+    )
+    mipdate_mock.today.return_value = mock_date
+
+    # get chart of accounts from mip
+    coa_dict = mips_api._chart_requests(mock_org_name, mock_secrets, False)
 
     # assert expected data
-    assert mips_dict == expected_mips_dict_raw
+    assert coa_dict == expected_coa_dict_full
 
     # assert all mock urls were called
     assert login_mock.call_count == 1
@@ -397,14 +554,21 @@ def test_upstream(mocker, requests_mock):
     assert account_mock.call_count == 1
     assert logout_mock.call_count == 1
 
-    # begin a second test with an alternate requests response
+    # get current balance from mip
+    balance_mock = requests_mock.post(
+        mips_api._mip_url_current_balance, json=mock_balance_success
+    )
+    balance_dict = mips_api._balance_requests(mock_org_name, mock_secrets)
+    assert balance_mock.call_count == 1
+    assert balance_dict == mock_balance_success
 
-    # inject new mock response with an Exception
-    requests_mock.get(mips_api._mips_url_coa_segments, exc=Exception)
+    # inject new mock response with an Exception for coa segments
+    requests_mock.get(mips_api._mip_url_coa_segments, exc=Exception)
 
     # assert logout is called when an exception is raised
-    mips_api._upstream_requests(org_name, mock_secrets)
     assert logout_mock.call_count == 2
+    mips_api._chart_requests(mock_org_name, mock_secrets, False)
+    assert logout_mock.call_count == 3
 
 
 def test_cache_read(mocker):
@@ -415,8 +579,8 @@ def test_cache_read(mocker):
     mips_api.s3_client = s3
     with Stubber(s3) as _stub:
         _stub.add_response("get_object", mock_s3_get_response)
-        found = mips_api._s3_cache_read(s3_bucket, s3_path)
-        assert found == expected_mips_dict_raw
+        found = mips_api._s3_cache_read(mock_s3_bucket, mock_s3_chart)
+        assert found == expected_coa_dict_raw
 
 
 def test_cache_write(mocker):
@@ -429,42 +593,82 @@ def test_cache_write(mocker):
         _stub.add_response("put_object", mock_s3_put_response)
 
         # assert no exception is raised
-        mips_api._s3_cache_write(expected_mips_dict_raw, s3_bucket, s3_path)
+        mips_api._s3_cache_write(expected_coa_dict_raw, mock_s3_bucket, mock_s3_chart)
 
 
 @pytest.mark.parametrize(
-    "upstream_response,cache_response",
+    "api_response,cache_response",
     [
-        (expected_mips_dict_raw, None),
-        (None, expected_mips_dict_raw),
-        (expected_mips_dict_raw, expected_mips_dict_raw),
+        (mock_balance_success, None),
+        (None, mock_balance_success),
+        (mock_balance_success, mock_balance_success),
     ],
 )
-def test_chart(mocker, upstream_response, cache_response):
-    """Test chart_cache() with no upstream response"""
+def test_balance_cache(mocker, api_response, cache_response):
+    """Test balance_cache() with no upstream response"""
     mocker.patch(
-        "mips_api._upstream_requests",
+        "mips_api._balance_requests",
         autospec=True,
-        return_value=upstream_response,
+        return_value=api_response,
     )
     mocker.patch(
         "mips_api._s3_cache_read",
         autospec=True,
         return_value=cache_response,
     )
-    write_mock = mocker.patch(
+    mocker.patch(
         "mips_api._s3_cache_write",
         autospec=True,
     )
 
-    found_dict = mips_api.chart_cache(org_name, mock_secrets, s3_bucket, s3_path)
-    assert found_dict == expected_mips_dict_raw
+    found_dict = mips_api.balance_cache(
+        mock_org_name,
+        mock_secrets,
+        mock_s3_bucket,
+        mock_s3_chart,
+    )
+    assert found_dict == mock_balance_success
+
+
+@pytest.mark.parametrize(
+    "chart_response,cache_response",
+    [
+        (expected_coa_dict_raw, None),
+        (None, expected_coa_dict_raw),
+        (expected_coa_dict_raw, expected_coa_dict_raw),
+    ],
+)
+def test_chart_cache(mocker, chart_response, cache_response):
+    """Test chart_cache() with no upstream response"""
+    mocker.patch(
+        "mips_api._chart_requests",
+        autospec=True,
+        return_value=chart_response,
+    )
+    mocker.patch(
+        "mips_api._s3_cache_read",
+        autospec=True,
+        return_value=cache_response,
+    )
+    mocker.patch(
+        "mips_api._s3_cache_write",
+        autospec=True,
+    )
+
+    found_dict = mips_api.chart_cache(
+        mock_org_name,
+        mock_secrets,
+        mock_s3_bucket,
+        mock_s3_chart,
+        True,
+    )
+    assert found_dict == expected_coa_dict_raw
 
 
 def test_chart_invalid(mocker):
     """Test chart_cache() with no valid response found"""
     mocker.patch(
-        "mips_api._upstream_requests",
+        "mips_api._chart_requests",
         autospec=True,
         return_value=None,
     )
@@ -476,7 +680,13 @@ def test_chart_invalid(mocker):
 
     # assert that we raise a ValueError
     with pytest.raises(ValueError):
-        found_dict = mips_api.chart_cache(org_name, mock_secrets, s3_bucket, s3_path)
+        _ = mips_api.chart_cache(
+            mock_org_name,
+            mock_secrets,
+            mock_s3_bucket,
+            mock_s3_chart,
+            False,
+        )
 
 
 @pytest.mark.parametrize(
@@ -486,7 +696,7 @@ def test_chart_invalid(mocker):
         ("", []),
         ("1", ["1"]),
         ("1,2", ["1", "2"]),
-        (omit_codes, expected_omit_codes),
+        (mock_omit_codes, expected_omit_codes),
     ],
 )
 def test_parse_codes(code_str, code_list):
@@ -495,29 +705,84 @@ def test_parse_codes(code_str, code_list):
 
 
 @pytest.mark.parametrize(
-    "params,expected_dict",
+    "priority_codes,hide_inactive,show_other,show_no_program,expected_dict",
     [
-        ({}, expected_mips_dict_processed),
-        (mock_foo_param, expected_mips_dict_processed),
-        (mock_other_param, expected_mips_dict_processed_other),
-        (mock_inactive_param, expected_mips_dict_processed_inactive),
-        (mock_no_program_param, expected_mips_dict_processed_no),
-        (mock_priority_param, expected_mips_dict_processed),
+        ([], True, False, True, expected_coa_dict_processed),  # default values
         (
-            mock_priority_param | mock_inactive_param,
-            expected_mips_dict_processed_priority_codes,
-        ),
+            [],
+            True,
+            False,
+            False,
+            expected_coa_dict_processed_no,
+        ),  # hide no program
+        ([], True, True, True, expected_coa_dict_processed_other),  # show other
         (
-            mock_other_param | mock_no_program_param,
-            expected_mips_dict_processed_other_no,
-        ),
+            [],
+            False,
+            False,
+            True,
+            expected_coa_dict_processed_inactive,
+        ),  # show inactive
+        (
+            [],
+            False,
+            True,
+            True,
+            expected_coa_dict_processed_other_inactive,
+        ),  # show other and inactive
+        (
+            mock_priority_codes_list,
+            True,
+            False,
+            True,
+            expected_coa_dict_processed_priority_codes,
+        ),  # inject priority codes
+        (
+            mock_priority_codes_list,
+            False,
+            False,
+            False,
+            expected_coa_dict_processed_priority_codes_inactive,
+        ),  # inject priority codes, show inactive, hide no program
     ],
 )
-def test_process_chart(params, expected_dict):
+def test_process_chart(
+    priority_codes, hide_inactive, show_other, show_no_program, expected_dict
+):
+    if hide_inactive:
+        coa_dict = expected_coa_dict_raw
+    else:
+        coa_dict = expected_coa_dict_full
+
     processed_chart = mips_api.process_chart(
-        params, expected_mips_dict_raw, expected_omit_codes, other_code, no_program_code
+        coa_dict,
+        expected_omit_codes,
+        priority_codes,
+        hide_inactive,
+        mock_other_code,
+        show_other,
+        mock_no_program_code,
+        show_no_program,
     )
-    assert json.dumps(processed_chart) == json.dumps(expected_dict)
+    assert processed_chart == expected_dict
+
+
+@pytest.mark.parametrize(
+    "bal_dict, coa_dict, fail",
+    [
+        (mock_balance_empty, expected_coa_dict_full, True),
+        (mock_balance_invalid1, expected_coa_dict_full, True),
+        (mock_balance_invalid2, expected_coa_dict_full, True),
+        (mock_balance_success, expected_coa_dict_full, False),
+    ],
+)
+def test_process_balance(bal_dict, coa_dict, fail):
+    if fail:
+        with pytest.raises(Exception):
+            mips_api.process_balance(bal_dict, coa_dict)
+    else:
+        found_rows = mips_api.process_balance(bal_dict, coa_dict)
+        assert found_rows == expected_balance_rows
 
 
 @pytest.mark.parametrize(
@@ -561,40 +826,50 @@ def test_param_limit_int(params, expected_int):
 )
 def test_param_limit_int_err(params):
     with pytest.raises(ValueError):
-        found_limit_int = mips_api._param_limit_int(params)
+        mips_api._param_limit_int(params)
 
 
 @pytest.mark.parametrize(
-    "params,input_chart,expected_chart",
+    "params,expected_codes",
     [
-        ({}, expected_mips_dict_processed, expected_mips_dict_processed),
-        (mock_foo_param, expected_mips_dict_raw, expected_mips_dict_raw),
-        (mock_limit_param, expected_mips_dict_raw, expected_mips_dict_raw_limit),
+        ("", []),
+        (mock_priority_codes_str, mock_priority_codes_list),
+    ],
+)
+def test_param_priority_codes(params, expected_codes):
+    found_codes = mips_api._parse_codes(params)
+    assert found_codes == expected_codes
+
+
+@pytest.mark.parametrize(
+    "input_chart,limit,expected_chart",
+    [
+        (expected_coa_dict_processed, 0, expected_coa_dict_processed),
+        (expected_coa_dict_raw, mock_limit, expected_coa_dict_raw_limit),
         (
-            mock_limit_param | mock_foo_param,
-            expected_mips_dict_processed,
-            expected_mips_dict_processed_limit,
+            expected_coa_dict_processed,
+            mock_limit,
+            expected_coa_dict_processed_limit,
         ),
     ],
 )
-def test_limit_chart(params, input_chart, expected_chart):
-    processed_chart = mips_api.limit_chart(params, input_chart)
+def test_limit_chart(input_chart, limit, expected_chart):
+    processed_chart = mips_api.limit_chart(input_chart, limit)
     assert processed_chart == expected_chart
 
 
 @pytest.mark.parametrize(
-    "params,expected_list",
+    "expected_list,limit",
     [
-        ({}, expected_tag_list),
-        (mock_foo_param, expected_tag_list),
-        (mock_limit_param, expected_tag_list_limit),
+        (expected_tag_list, 0),
+        (expected_tag_list_limit, mock_limit),
     ],
 )
-def test_tags(params, expected_list):
+def test_tags(expected_list, limit):
     """Testing building tag list from collected chart of accounts"""
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(params, expected_mips_dict_processed)
+    tag_list = mips_api.list_tags(expected_coa_dict_processed, limit)
     assert tag_list == expected_list
 
 
@@ -606,42 +881,57 @@ def test_lambda_handler_no_env(invalid_event):
     assert ret["statusCode"] == 500
 
 
-def _test_with_env(mocker, event, code, body=None, error=None):
+def _test_with_env(mocker, event, code, body=None, error=None, text=None):
     """Keep lambda_handler tests DRY"""
 
     # mock environment variables
     env_vars = {
-        "MipsOrg": org_name,
-        "SsmPath": ssm_path,
-        "ApiChartOfAccounts": api_accounts,
-        "ApiValidTags": api_tags,
-        "CodesToOmit": omit_codes,
-        "NoProgramCode": no_program_code,
-        "OtherCode": other_code,
-        "CacheBucket": s3_bucket,
-        "CacheBucketPath": s3_path,
+        "MipsOrg": mock_org_name,
+        "SsmPath": mock_ssm_path,
+        "ApiChartOfAccounts": mock_api_accounts,
+        "ApiTrialBalances": mock_api_balance,
+        "ApiValidTags": mock_api_tags,
+        "CodesToOmit": mock_omit_codes,
+        "NoProgramCode": mock_no_program_code,
+        "OtherCode": mock_other_code,
+        "CacheBucket": mock_s3_bucket,
+        "CacheBucketPathChart": mock_s3_chart,
+        "CacheBucketPathBalance": mock_s3_balance,
     }
     mocker.patch.dict(os.environ, env_vars)
 
     # mock out collect_secrets() with mock secrets
     mocker.patch("mips_api.collect_secrets", autospec=True, return_value=mock_secrets)
 
-    # mock out chart_cache() with mock chart
+    # mock out chart_cache() with mock response
     mocker.patch(
-        "mips_api.chart_cache", autospec=True, return_value=expected_mips_dict_raw
+        "mips_api.chart_cache",
+        autospec=True,
+        return_value=expected_coa_dict_raw,
+    )
+
+    # mock out balance_cache() with mock response
+    mocker.patch(
+        "mips_api.balance_cache",
+        autospec=True,
+        return_value=mock_balance_success,
     )
 
     # test event
     ret = mips_api.lambda_handler(event, None)
-    json_body = json.loads(ret["body"])
-
-    if error is not None:
-        assert json_body["error"] == error
-
-    elif body is not None:
-        assert json_body == body
-
     assert ret["statusCode"] == code
+
+    if text is not None:
+        assert ret["body"] == text
+
+    else:
+        json_body = json.loads(ret["body"])
+
+        if body is not None:
+            assert json_body == body
+
+        if error is not None:
+            assert json_body["error"] == error
 
 
 def test_lambda_handler_invalid_path(invalid_event, mocker):
@@ -659,7 +949,24 @@ def test_lambda_handler_empty_event(mocker):
 def test_lambda_handler_accounts(accounts_event, mocker):
     """Test chart-of-accounts event"""
 
-    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict_processed)
+    _test_with_env(mocker, accounts_event, 200, body=expected_coa_dict_processed)
+
+
+def test_lambda_handler_accounts_priority(accounts_priority_event, mocker):
+    """Test chart-of-accounts event with priority codes"""
+
+    _test_with_env(
+        mocker,
+        accounts_priority_event,
+        200,
+        body=expected_coa_dict_processed_priority_codes,
+    )
+
+
+def test_lambda_handler_balance(balances_event, mocker):
+    """Test tag-list event"""
+
+    _test_with_env(mocker, balances_event, 200, text=expected_balance_csv)
 
 
 def test_lambda_handler_tags(tags_event, mocker):

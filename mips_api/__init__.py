@@ -1,7 +1,11 @@
+import csv
+import io
 import json
 import logging
 import os
 import re
+from datetime import date
+
 
 import backoff
 import boto3
@@ -12,10 +16,13 @@ from urllib3.exceptions import RequestError
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
-_mips_url_login = "https://login.mip.com/api/v1/sso/mipadv/login"
-_mips_url_coa_segments = "https://api.mip.com/api/coa/segments"
-_mips_url_coa_accounts = "https://api.mip.com/api/coa/segments/accounts"
-_mips_url_logout = "https://api.mip.com/api/security/logout"
+_mip_url_login = "https://login.mip.com/api/v1/sso/mipadv/login"
+_mip_url_coa_segments = "https://api.mip.com/api/coa/segments"
+_mip_url_coa_accounts = "https://api.mip.com/api/coa/segments/accounts"
+_mip_url_current_balance = (
+    "https://api.mip.com/api/model/CBODispBal/methods/GetAccountBalances"
+)
+_mip_url_logout = "https://api.mip.com/api/security/logout"
 
 # These are global so that they can be stubbed in test.
 # Because they are global their value will be retained
@@ -45,15 +52,18 @@ def _param_bool(params, param):
     return False
 
 
-def _param_inactive_bool(params):
+def _param_hide_inactive_bool(params):
+    # default True
     return not _param_bool(params, "show_inactive_codes")
 
 
-def _param_other_bool(params):
+def _param_show_other_bool(params):
+    # default False
     return _param_bool(params, "show_other_code")
 
 
-def _param_no_program_bool(params):
+def _param_show_no_program_bool(params):
+    # default True
     return not _param_bool(params, "hide_no_program_code")
 
 
@@ -72,6 +82,21 @@ def _param_priority_list(params):
         return _parse_codes(params["priority_codes"])
 
     return None
+
+
+# helper functions to encapsulate the body, headers, and status code
+def _build_return_json(code, body):
+    return {
+        "statusCode": code,
+        "body": json.dumps(body, indent=2),
+    }
+
+
+def _build_return_text(code, body):
+    return {
+        "statusCode": code,
+        "body": body,
+    }
 
 
 def collect_secrets(ssm_path):
@@ -121,7 +146,7 @@ def _request_login(creds):
     LOG.info("Logging in to upstream API")
 
     login_response = requests.post(
-        _mips_url_login,
+        _mip_url_login,
         json=creds,
         timeout=timeout,
     )
@@ -143,7 +168,7 @@ def _request_program_segment(access_token):
 
     # get segments from api
     segment_response = requests.get(
-        _mips_url_coa_segments,
+        _mip_url_coa_segments,
         headers={"Authorization-Token": access_token},
         timeout=timeout,
     )
@@ -165,7 +190,7 @@ def _request_program_segment(access_token):
 
 
 @backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
-def _request_accounts(access_token, program_id):
+def _request_accounts(access_token, program_id, hide_inactive):
     """
     Wrap the request for chart of accounts with backoff decorator, using
     exponential backoff and running for at most 11 seconds. With a
@@ -177,7 +202,7 @@ def _request_accounts(access_token, program_id):
 
     # get segments from api
     account_response = requests.get(
-        _mips_url_coa_accounts,
+        _mip_url_coa_accounts,
         headers={"Authorization-Token": access_token},
         timeout=timeout,
     )
@@ -187,12 +212,66 @@ def _request_accounts(access_token, program_id):
 
     accounts = {}
     for account in json_response["COA_SEGID"]:
-        # require "Program" segment and "A" status
-        if account["COA_SEGID"] == program_id and account["COA_STATUS"] == "A":
-            accounts[account["COA_CODE"]] = account["COA_TITLE"]
+        # require "Program" segment
+        if account["COA_SEGID"] == program_id:
+            if hide_inactive:
+                # require (A)ctive status
+                if account["COA_STATUS"] == "A":
+                    accounts[account["COA_CODE"]] = account["COA_TITLE"]
+            else:
+                accounts[account["COA_CODE"]] = account["COA_TITLE"]
 
     LOG.info(f"Chart of accounts: {accounts}")
     return accounts
+
+
+@backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
+def _request_balance(access_token, period_from, period_to):
+    timeout = 4
+    LOG.info("Getting balances")
+
+    # copied from chrome dev tools while clicking through the web ui
+    body = {
+        "BOInformation": {
+            "constructor": {},
+            "ModelFields": {
+                "fields": [
+                    {"DISPBAL_DATEFROM": period_from},
+                    {"DISPBAL_DATETO": period_to},
+                ],
+                "DISPBAL_SEGINFO": [
+                    {
+                        "fields": [
+                            {"GRID_PHY_ID": 0},
+                            {"FILTER_SELECT": True},
+                            {"FILTER_ORDER": -1},
+                            {"FILTER_FIX": False},
+                            {"FILTER_DATATYPE": 10},
+                            {"FILTER_FIELDTYPE": 40},
+                            {"FILTER_ITEM": "Program"},
+                            {"FILTER_OPERATOR": "<>"},
+                            {"FILTER_CRITERIA1": "<Blank>"},
+                            {"FILTER_CRITERIA2": ""},
+                        ]
+                    }
+                ],
+            },
+        },
+        "MethodParameters": {"strJson": '{"level":1}'},
+    }
+
+    api_response = requests.post(
+        _mip_url_current_balance,
+        headers={"Authorization-Token": access_token},
+        timeout=timeout,
+        json=body,
+    )
+    api_response.raise_for_status()
+    json_response = api_response.json()
+    LOG.debug(f"Raw balance documents json: {json_response}")
+
+    balance = json_response
+    return balance
 
 
 @backoff.on_exception(backoff.fibo, (RequestError, RequestException), max_time=28)
@@ -211,35 +290,35 @@ def _request_logout(access_token):
     LOG.info("Logging out of upstream API")
 
     requests.post(
-        _mips_url_logout,
+        _mip_url_logout,
         headers={"Authorization-Token": access_token},
         timeout=timeout,
     )
 
 
-def _upstream_requests(org_name, secrets):
+def _chart_requests(org_name, secrets, hide_inactive):
     """
     Log into MIPS, get the chart of accounts, and log out
     """
 
-    mips_dict = {}
+    coa_dict = {}
     access_token = None
 
-    mips_creds = {
+    mip_creds = {
         "username": secrets["user"],
         "password": secrets["pass"],
         "org": org_name,
     }
 
     try:
-        # get mips access token
-        access_token = _request_login(mips_creds)
+        # get mip access token
+        access_token = _request_login(mip_creds)
 
         # get the chart segments
         program_id = _request_program_segment(access_token)
 
         # get the chart of accounts
-        mips_dict = _request_accounts(access_token, program_id)
+        coa_dict = _request_accounts(access_token, program_id, hide_inactive)
 
     except Exception as exc:
         LOG.exception("Error interacting with upstream API")
@@ -247,13 +326,74 @@ def _upstream_requests(org_name, secrets):
     finally:
         # It's important to logout. Logging in a second time without
         # logging out will lock us out of the upstream API
-        if access_token is not None:
-            try:
-                _request_logout(access_token)
-            except Exception as exc:
-                LOG.exception("Error logging out")
+        try:
+            _request_logout(access_token)
+        except Exception as exc:
+            LOG.exception("Error logging out")
 
-    return mips_dict
+    return coa_dict
+
+
+def _balance_dates():
+    today = date.today()
+    LOG.info(f"Today is {today}")
+
+    if today.day < 7:
+        # at the beginning of the month, look at last month
+        end = today.replace(day=1)  # first of this month
+        start = end.replace(month=end.month - 1)  # first day of last month
+
+        end_str = end.strftime("%m/%d/%Y")
+        start_str = start.strftime("%m/%d/%Y")
+
+        LOG.info(f"Start day is {start_str}")
+        LOG.info(f"End day is {end_str}")
+
+        return start_str, end_str
+    else:
+        # otherwise look at month-to-date
+        start = today.replace(day=1)  # first of this month
+        end_str = today.strftime("%m/%d/%Y")
+        start_str = start.strftime("%m/%d/%Y")
+
+        LOG.info(f"Start day is {start_str}")
+        LOG.info(f"End day is {end_str}")
+
+        return start_str, end_str
+
+
+def _balance_requests(org_name, secrets):
+    bal_dict = {}
+    access_token = None
+
+    start_str, end_str = _balance_dates()
+
+    mip_creds = {
+        "username": secrets["user"],
+        "password": secrets["pass"],
+        "org": org_name,
+    }
+
+    try:
+        # get mip access token
+        access_token = _request_login(mip_creds)
+        bal_dict = _request_balance(access_token, start_str, end_str)
+    except Exception as exc:
+        LOG.exception(exc)
+    finally:
+        # It's important to logout. Logging in a second time without
+        # logging out will lock us out of the upstream API
+        try:
+            _request_logout(access_token)
+        except Exception as exc:
+            LOG.exception("Error logging out")
+
+    bal_dict["period_from"] = start_str
+    bal_dict["period_to"] = end_str
+
+    LOG.debug(f"Balance dict: {bal_dict}")
+
+    return bal_dict
 
 
 def _s3_cache_read(bucket, path):
@@ -280,7 +420,7 @@ def _s3_cache_write(data, bucket, path):
     s3_client.put_object(Bucket=bucket, Key=path, Body=body)
 
 
-def chart_cache(org_name, secrets, bucket, path):
+def s3_cache(src_dict, bucket, path):
     """
     Access the Chart of Accounts from MIP Cloud, and implement a write-through
     cache of successful responses to tolerate long-term faults in the upstream
@@ -295,48 +435,85 @@ def chart_cache(org_name, secrets, bucket, path):
     only update the S3 object if it changes.
     """
 
-    coa_dict = None
+    out_dict = None
     cache_dict = None
 
-    # get the upstream API response
-    LOG.info("Read chart of accounts from upstream API")
-    upstream_dict = _upstream_requests(org_name, secrets)
-    LOG.debug(f"Upstream API response: {upstream_dict}")
-
     # always read cached value
-    LOG.info("Read cached chart of accounts from S3")
+    LOG.info("Read cached json from S3")
     try:
         cache_dict = _s3_cache_read(bucket, path)
         LOG.debug(f"Cached API response: {cache_dict}")
     except Exception as exc:
         LOG.exception("S3 read failure")
 
-    if upstream_dict:
+    if src_dict:
         # if we received a non-empty response from the upstream API, compare it
         # to our cached response and update the S3 write-through cache if needed
-        if upstream_dict == cache_dict:
+        if src_dict == cache_dict:
             LOG.debug("No change in chart of accounts")
         else:
             # store write-through cache
             LOG.info("Write updated chart of accounts to S3")
             try:
-                _s3_cache_write(upstream_dict, bucket, path)
+                _s3_cache_write(src_dict, bucket, path)
             except Exception as exc:
                 LOG.exception("S3 write failure")
-        coa_dict = upstream_dict
+        out_dict = src_dict
     else:
         # no response (or an empty response) from the upstream API,
         # rely on our response cached in S3.
-        coa_dict = cache_dict
+        out_dict = cache_dict
 
-    if not coa_dict:
+    if not out_dict:
         # make sure we don't return an empty value
         raise ValueError("No valid chart of accounts found")
 
-    return coa_dict
+    return out_dict
 
 
-def process_chart(params, chart_dict, omit_list, other, no_program):
+def chart_cache(org_name, secrets, bucket, path, inactive):
+    """
+    Access the Chart of Accounts from MIP Cloud, and implement a
+    write-through cache of successful responses to tolerate long-term
+    faults in the upstream API.
+
+    A successful API response will be stored in S3 indefinitely, to be
+    retrieved and used in the case of an API failure.
+
+    The S3 bucket has versioning enabled for disaster recovery, but this
+    means that every PUT request will create a new S3 object. In order
+    to minimize the number of objects in the bucket, read the cache
+    value on every run and only update the S3 object if it changes.
+    """
+
+    # get the upstream API response
+    LOG.info("Read chart of accounts from upstream API")
+    upstream_dict = _chart_requests(org_name, secrets, inactive)
+    LOG.debug(f"Upstream API response: {upstream_dict}")
+
+    chart_dict = s3_cache(upstream_dict, bucket, path)
+    return chart_dict
+
+
+def balance_cache(org_name, secrets, bucket, path):
+    LOG.info("Read trial balances from upstream API")
+    upstream_dict = _balance_requests(org_name, secrets)
+    LOG.debug(f"Upstream API response: {upstream_dict}")
+
+    bal_dict = s3_cache(upstream_dict, bucket, path)
+    return bal_dict
+
+
+def process_chart(
+    chart_dict,
+    omit_list,
+    priority_codes,
+    hide_inactive,
+    other_code,
+    show_other,
+    no_program_code,
+    show_no_program,
+):
     """
     Process chart of accounts to remove unneeded programs,
     and inject some extra (meta) programs.
@@ -354,13 +531,10 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
     # output object
     out_chart = {}
 
-    # whether to filter out inactive codes
+    # whether to show inactive codes
     code_len = 5
-    if _param_inactive_bool(params):
+    if hide_inactive:
         code_len = 6
-
-    # optionally move this list of codes to the top of the output
-    priority_codes = _param_priority_list(params)
 
     # add short codes
     for code, _name in chart_dict.items():
@@ -370,7 +544,8 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
             # enforce AWS tags limitations
             # https://docs.aws.amazon.com/tag-editor/latest/userguide/best-practices-and-strats.html
             # enforce removing special characters globally for consistency,
-            # only enforce string limit when listing tag values because the string size will change.
+            # only enforce string limit when listing tag values because
+            # the string size will change.
             regex = r"[^\d\w\s.:/=+\-@]+"
             name = re.sub(regex, "", _name)
 
@@ -380,11 +555,12 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
 
             if priority_codes is not None:
                 if short in priority_codes:
-                    # Since Python 3.7, python dictionaries preserve insertion
-                    # order, so to prepend an item to the top of the dictionary,
-                    # we create a new dictionary inserting the target code first,
-                    # then add the previous output, and finally save the new
-                    # dictionary as our output dictionary.
+                    # Since Python 3.7, python dictionaries preserve
+                    # insertion order, so to prepend an item to the top
+                    # of the dictionary, we create a new dictionary
+                    # inserting the target code first, then add the
+                    # previous output, and finally save the new
+                    # dictionary as our output.
                     new_chart = {short: name}
                     new_chart.update(out_chart)
                     out_chart = new_chart
@@ -397,36 +573,36 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
                 found_codes.append(short)
 
     # inject "other" code
-    if _param_other_bool(params):
-        new_chart = {other: "Other"}
+    if show_other:
+        new_chart = {other_code: "Other"}
         new_chart.update(out_chart)
         out_chart = new_chart
 
     # inject "no program" code
-    if _param_no_program_bool(params):
-        new_chart = {no_program: "No Program"}
+    if show_no_program:
+        new_chart = {no_program_code: "No Program"}
         new_chart.update(out_chart)
         out_chart = new_chart
 
     return out_chart
 
 
-def limit_chart(params, mips_dict):
+def limit_chart(coa_dict, limit):
     """
     Optionally limit the size of the chart based on a query-string parameter.
     """
 
     # if a 'limit' query-string parameter is defined, "slice" the dictionary
-    limit = _param_limit_int(params)
     if limit > 0:
         # https://stackoverflow.com/a/66535220/1742875
-        _mips_dict = dict(list(mips_dict.items())[:limit])
-        return _mips_dict
+        # broken into two steps
+        _coa_dict_list = list(coa_dict.items())
+        coa_dict = dict(_coa_dict_list[:limit])
 
-    return mips_dict
+    return coa_dict
 
 
-def list_tags(params, chart_dict):
+def list_tags(chart_dict, limit):
     """
     Generate a list of valid AWS tags. Only active codes are listed.
 
@@ -447,12 +623,100 @@ def list_tags(params, chart_dict):
         tag = f"{name[:245]} / {code[:6]}"
         tags.append(tag)
 
-    limit = _param_limit_int(params)
     if limit > 0:
         LOG.info(f"limiting output to {limit} values")
         return tags[0:limit]
     else:
         return tags
+
+
+def process_balance(bal_dict, coa_dict):
+
+    # check for success
+    if "executionResult" not in bal_dict:
+        LOG.error(f"No execution result found: '{bal_dict}'")
+        raise KeyError("No 'executionResult' key found")
+
+    result = bal_dict["executionResult"]
+    if result != "SUCCESS":
+        LOG.error(f"Execution result is not 'SUCCESS': '{result}'")
+        raise ValueError("Execution result is not 'SUCCESS'")
+
+    # collate api response into a dict
+    _data = {}
+
+    _detail = []
+    for k, v in bal_dict["extraInformation"].items():
+        if k != "Level1":
+            LOG.error(f"Unexpected key (not 'Level1'): {k}")
+            raise KeyError("No 'Level1' key found")
+        else:
+            _detail = v
+
+    for d in _detail:
+        program_id = d["DBDETAIL_SUM_SEGMENT_N2"]
+        if program_id not in _data:
+            _data[program_id] = {}
+
+        if d["DBDETAIL_SUM_TYPE"] == 1:
+            _data[program_id]["balance_start"] = d["DBDETAIL_SUM_POSTEDAMT"]
+        elif d["DBDETAIL_SUM_TYPE"] == 2:
+            _data[program_id]["activity"] = d["DBDETAIL_SUM_POSTEDAMT"]
+        elif d["DBDETAIL_SUM_TYPE"] == 3:
+            _data[program_id]["balance_end"] = d["DBDETAIL_SUM_POSTEDAMT"]
+        else:
+            LOG.error(f"Unknown balance type: {d['DBDETAIL_SUM_DESC']}")
+
+    LOG.debug(f"Raw internal balance dict: {_data}")
+
+    # List of rows in CSV
+    out_rows = []
+
+    # Add header row
+    headers = [
+        "AccountNumber",
+        "AccountName",
+        "PeriodStart",
+        "PeriodEnd",
+        "StartBalance",
+        "Activity",
+        "EndBalance",
+    ]
+    out_rows.append(headers)
+
+    # Generate rows from input dict
+    for k, v in _data.items():
+        name = None
+        if k not in coa_dict:
+            LOG.error(f"Key {k} not found in chart of accounts")
+            LOG.debug(f"List of keys: {coa_dict.keys()}")
+            name = k
+        else:
+            name = coa_dict[k]
+
+        row = [
+            k,
+            name,
+            bal_dict["period_from"],
+            bal_dict["period_to"],
+            v["balance_start"],
+            v["activity"],
+            v["balance_end"],
+        ]
+        out_rows.append(row)
+
+    return out_rows
+
+
+def format_balance(bal_dict, coa_dict):
+    csv_out = io.StringIO()
+    csv_writer = csv.writer(csv_out)
+
+    csv_rows = process_balance(bal_dict, coa_dict)
+    for row in csv_rows:
+        csv_writer.writerow(row)
+
+    return csv_out.getvalue()
 
 
 def lambda_handler(event, context):
@@ -477,36 +741,28 @@ def lambda_handler(event, context):
         Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
     """
 
-    # helper functions to encapsulate the body, headers, and status code
-    def _build_return(code, body):
-        return {
-            "statusCode": code,
-            "body": json.dumps(body, indent=2),
-        }
-
     try:
         # collect environment variables
-        mips_org = _get_os_var("MipsOrg")
+        mip_org = _get_os_var("MipsOrg")
         ssm_path = _get_os_var("SsmPath")
         s3_bucket = _get_os_var("CacheBucket")
-        s3_path = _get_os_var("CacheBucketPath")
+        s3_chart_path = _get_os_var("CacheBucketPathChart")
+        s3_balance_path = _get_os_var("CacheBucketPathBalance")
 
         code_other = _get_os_var("OtherCode")
         code_no_program = _get_os_var("NoProgramCode")
 
-        api_routes = {}
-        api_routes["ApiChartOfAccounts"] = _get_os_var("ApiChartOfAccounts")
-        api_routes["ApiValidTags"] = _get_os_var("ApiValidTags")
+        api_routes = {
+            "ApiChartOfAccounts": _get_os_var("ApiChartOfAccounts"),
+            "ApiValidTags": _get_os_var("ApiValidTags"),
+            "ApiTrialBalances": _get_os_var("ApiTrialBalances"),
+        }
 
         _to_omit = _get_os_var("CodesToOmit")
         omit_codes_list = _parse_codes(_to_omit)
 
-        # get secure parameters
+        # collect secure parameters
         ssm_secrets = collect_secrets(ssm_path)
-
-        # get chart of accounts from mips
-        raw_chart = chart_cache(mips_org, ssm_secrets, s3_bucket, s3_path)
-        LOG.debug(f"Raw chart data: {raw_chart}")
 
         # collect query-string parameters
         params = {}
@@ -514,30 +770,70 @@ def lambda_handler(event, context):
             params = event["queryStringParameters"]
             LOG.debug(f"Query-string parameters: {params}")
 
+        limit_length = _param_limit_int(params)
+        priority_codes = _param_priority_list(params)
+        hide_inactive = _param_hide_inactive_bool(params)
+        show_no_program = _param_show_no_program_bool(params)
+        show_other = _param_show_other_bool(params)
+
         # parse the path and return appropriate data
         if "path" in event:
             event_path = event["path"]
 
-            # always process the chart of accounts
-            mips_chart = process_chart(
-                params, raw_chart, omit_codes_list, code_other, code_no_program
-            )
+            if event_path == api_routes["ApiTrialBalances"]:
+                raw_chart = chart_cache(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_chart_path,
+                    False,
+                )
+                LOG.debug(f"Raw chart data: {raw_chart}")
 
-            if event_path == api_routes["ApiChartOfAccounts"]:
-                # conditionally limit the size of the output
-                _mips_chart = limit_chart(params, mips_chart)
-                return _build_return(200, _mips_chart)
+                # Process current balances
+                raw_bal = balance_cache(
+                    mip_org, ssm_secrets, s3_bucket, s3_balance_path
+                )
+                bal_csv = format_balance(raw_bal, raw_chart)
 
-            elif event_path == api_routes["ApiValidTags"]:
-                # build a list of strings from the processed dictionary
-                valid_tags = list_tags(params, mips_chart)
-                return _build_return(200, valid_tags)
-
+                return _build_return_text(200, bal_csv)
             else:
-                return _build_return(404, {"error": "Invalid request path"})
+                raw_chart = chart_cache(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_chart_path,
+                    hide_inactive,
+                )
+                LOG.debug(f"Raw chart data: {raw_chart}")
+                coa_chart = process_chart(
+                    raw_chart,
+                    omit_codes_list,
+                    priority_codes,
+                    hide_inactive,
+                    code_other,
+                    show_other,
+                    code_no_program,
+                    show_no_program,
+                )
 
-        return _build_return(400, {"error": f"Invalid event: No path found: {event}"})
+                if event_path == api_routes["ApiChartOfAccounts"]:
+                    # conditionally filter the output
+                    _coa_chart = limit_chart(coa_chart, limit_length)
+                    return _build_return_json(200, _coa_chart)
+
+                elif event_path == api_routes["ApiValidTags"]:
+                    # build a list of strings from the processed dictionary
+                    valid_tags = list_tags(coa_chart, limit_length)
+                    return _build_return_json(200, valid_tags)
+                else:
+                    return _build_return_json(404, {"error": "Invalid request path"})
+
+        else:
+            return _build_return_json(
+                400, {"error": f"Invalid event: No path found: {event}"}
+            )
 
     except Exception as exc:
         LOG.exception(exc)
-        return _build_return(500, {"error": str(exc)})
+        return _build_return_json(500, {"error": str(exc)})

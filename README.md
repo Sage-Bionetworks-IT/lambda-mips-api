@@ -4,15 +4,16 @@ An AWS Lambda microservice presenting MIPS chart of accounts data
 
 ## Architecture
 
-This microservice is designed to retrieve a chart of accounts from a third-party
-API and present the data in a useful format.
+This microservice is designed to retrieve data using the MIP Cloud API and
+present the data in a useful format.
 
 Formats available:
 
-| API Route | Description                                                              |
-| --------- | ------------------------------------------------------------------------ |
-| /accounts | A dictionary mapping the chart of accounts to their friendly names.      |
-| /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`. |
+| API Route | Description                                                                  |
+| --------- | ---------------------------------------------------------------------------- |
+| /accounts | A dictionary mapping the chart of accounts to their friendly names.          |
+| /balances | A CSV listing current account balances, appropriate for FloQast consumption. |
+| /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`.     |
 
 Since we reach out to a third-party API across the internet, responses are
 cached to minimize interaction with the API and mitigate potential environmental
@@ -28,7 +29,7 @@ data to be stored in Cloudfront for a default of one day.
 In the event of a cache hit, Cloudfront will return the cached value without
 triggering an API gateway event.
 
-### Default Behavior
+### Chart of Accounts Behavior
 
 By default, the lambda will process the chart of accounts received to remove
 inactive codes, deduplicate the significant portion of active codes, and add a
@@ -40,6 +41,11 @@ Specific account codes from the chart of accounts can be ignored globally with
 the `CodesToOmit` template parameter. Remaining codes will be returned in
 numeric order as either a list of strings or a json dictionary depending on the
 API route.
+
+#### Current Balances
+
+When retrieving a CSV of current balances, the full chart of accounts will be
+processed without omitting or removing any account codes.
 
 ### Required Secure Parameters
 
@@ -73,16 +79,20 @@ environment:
 
 ### Query String Parameters
 
-Several query-string parameters are available for either endpoint to configure
-response output.
+Several query-string parameters are shared by the `/accounts` and `/tags`
+endpoints to configure the list of accounts in the response output. These have
+no effect on the `/balances` endpoint.
 
 | Query String Parameter | Allowed Values                        |
 | ---------------------- | ------------------------------------- |
-| show_other_code        | "on" or "yes" or "true"               |
-| hide_no_program_code   | "on" or "yes" or "true"               |
-| show_inactive_codes    | "on" or "yes" or "true"               |
+| show_other_code        | Boolean value                         |
+| hide_no_program_code   | Boolean value                         |
+| show_inactive_codes    | Boolean value                         |
 | priority_codes         | Comma-separated list of numeric codes |
 | limit                  | Integer                               |
+
+Boolean values: any value other than "no", "off", or "false" will be interpreted
+as true, including the empty string.
 
 A `show_other_code` parameter is available to optionally include an "Other"
 entry in the output with a value from the `OtherCode` parameter. Defining any
