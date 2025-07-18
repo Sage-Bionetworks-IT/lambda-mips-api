@@ -1,7 +1,6 @@
-import json
 import logging
 
-from mip_api import chart, s3, ssm, upstream, util
+from mip_api import balances, chart, s3, ssm, upstream, util
 
 
 LOG = logging.getLogger(__name__)
@@ -38,19 +37,12 @@ def lambda_handler(event, context):
         Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
     """
 
-    # helper functions to encapsulate the body, headers, and status code
-    def _build_return(code, body):
-        return {
-            "statusCode": code,
-            "body": json.dumps(body, indent=2),
-        }
-
     try:
         # collect environment variables
-        mip_org = util.get_os_var("MipsOrg")
+        mip_org = util.get_os_var("MipOrg")
         ssm_path = util.get_os_var("SsmPath")
         s3_bucket = util.get_os_var("CacheBucket")
-        s3_path = util.get_os_var("CacheBucketPath")
+        s3_prefix = util.get_os_var("CacheBucketPrefix")
 
         code_other = util.get_os_var("OtherCode")
         code_no_program = util.get_os_var("NoProgramCode")
@@ -58,48 +50,103 @@ def lambda_handler(event, context):
         api_routes = {
             "ApiChartOfAccounts": util.get_os_var("ApiChartOfAccounts"),
             "ApiValidTags": util.get_os_var("ApiValidTags"),
+            "ApiTrialBalances": util.get_os_var("ApiTrialBalances"),
         }
 
         _to_omit = util.get_os_var("CodesToOmit")
         omit_codes_list = util.parse_codes(_to_omit)
 
+        # collect query-string parameters
+        params = util.params_dict(event)
+
+        # build S3 cache paths, with separate paths for each combination
+        # of endpoint and relevant parameters
+        s3_path_gl_coa = s3_prefix + "gl-coa"
+        if not params["hide_inactive"]:
+            s3_path_gl_coa += "-full"
+        s3_path_gl_coa += ".json"
+
+        s3_path_program_coa = s3_prefix + "program-coa"
+        if not params["hide_inactive"]:
+            s3_path_program_coa += "-full"
+        s3_path_program_coa += ".json"
+
+        s3_path_balances = s3_prefix + "balances"
+        if not params["hide_inactive"]:
+            s3_path_balances += "-full"
+        s3_path_balances += ".json"
+
         # get secure parameters
         ssm_secrets = ssm.get_secrets(ssm_path)
-
-        # get chart of accounts from mip cloud
-        raw_chart = chart.get_chart(mip_org, ssm_secrets, s3_bucket, s3_path)
-        LOG.debug(f"Raw chart data: {raw_chart}")
-
-        # collect query-string parameters
-        params = {}
-        if "queryStringParameters" in event:
-            params = event["queryStringParameters"]
-            LOG.debug(f"Query-string parameters: {params}")
 
         # parse the path and return appropriate data
         if "path" in event:
             event_path = event["path"]
 
-            # always process the chart of accounts
-            mip_chart = chart.process_chart(
-                params, raw_chart, omit_codes_list, code_other, code_no_program
-            )
+            if event_path == api_routes["ApiTrialBalances"]:
+                # get chart of GL accounts
+                gl_chart = chart.get_gl_chart(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_path_gl_coa,
+                    params["hide_inactive"],
+                )
+                LOG.debug(f"Raw chart data: {gl_chart}")
+
+                # get upstream balance data
+                raw_bal = balances.get_balances(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_path_balances,
+                    params["date"],
+                )
+
+                # combine them into CSV output
+                balances_csv = balances.format_csv(raw_bal, gl_chart)
+                return util.build_return_text(200, balances_csv)
+
+            else:  # common processing for '/accounts' and '/tags'
+
+                # get chart of Program accounts
+                _raw_program_chart = chart.get_program_chart(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_path_program_coa,
+                    params["hide_inactive"],
+                )
+                LOG.debug(f"Raw chart data: {_raw_program_chart}")
+
+                # always process the chart of Program accounts
+                _program_chart = chart.process_chart(
+                    _raw_program_chart,
+                    omit_codes_list,
+                    code_other,
+                    code_no_program,
+                    params,
+                )
+
+                # always limit the size of the chart
+                program_chart = chart.limit_chart(_program_chart, params["limit"])
 
             if event_path == api_routes["ApiChartOfAccounts"]:
-                # conditionally limit the size of the output
-                return_chart = chart.limit_chart(params, mip_chart)
-                return _build_return(200, return_chart)
+                # no more processing, return chart
+                return util.build_return_json(200, program_chart)
 
             elif event_path == api_routes["ApiValidTags"]:
                 # build a list of strings from the processed dictionary
-                valid_tags = chart.list_tags(params, mip_chart)
-                return _build_return(200, valid_tags)
+                valid_tags = chart.list_tags(program_chart)
+                return util.build_return_json(200, valid_tags)
 
-            else:
-                return _build_return(404, {"error": "Invalid request path"})
+            else:  # unknown API endpoint
+                return util.build_return_json(404, {"error": "Invalid request path"})
 
-        return _build_return(400, {"error": f"Invalid event: No path found: {event}"})
+        return util.build_return_json(
+            400, {"error": f"Invalid event: No path found: {event}"}
+        )
 
     except Exception as exc:
         LOG.exception(exc)
-        return _build_return(500, {"error": str(exc)})
+        return util.build_return_json(500, {"error": str(exc)})
