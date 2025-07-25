@@ -38,11 +38,14 @@ def get_secrets(ssm_path):
             ssm_secrets[name] = p["Value"]
             LOG.info(f"Loaded secret: {name}")
     else:
-        LOG.error(f"Invalid response from SSM client")
-        raise Exception
+        msg = "Invalid response from SSM client"
+        LOG.error(msg)
+        raise Exception(msg)
 
     for reqkey in ["user", "pass"]:
         if reqkey not in ssm_secrets:
-            raise Exception(f"Missing required secure parameter: {reqkey}")
+            msg = f"Missing required secure parameter: {reqkey}"
+            LOG.error(msg)
+            raise Exception(msg)
 
     return ssm_secrets

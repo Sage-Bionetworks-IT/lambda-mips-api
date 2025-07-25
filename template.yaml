@@ -67,6 +67,9 @@ Resources:
             Transitions:
               - TransitionInDays: 3
                 StorageClass: INTELLIGENT_TIERING
+          - Id: ExpireOldObjectVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 365
 
   CacheBucketPolicy:
     Type: AWS::S3::BucketPolicy
