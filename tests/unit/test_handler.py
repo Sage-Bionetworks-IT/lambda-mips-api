@@ -1,6 +1,6 @@
 import io
 
-import mips_api
+import mip_api
 
 import json
 import os
@@ -134,7 +134,7 @@ mock_accounts = {
 
 
 # expected internal dictionary
-expected_mips_dict_raw = {
+expected_mip_dict_raw = {
     "12345600": "Program Part A",
     "12345601": "Program Part B",
     "23456700": "Other Program",
@@ -146,17 +146,17 @@ expected_mips_dict_raw = {
 }
 
 
-mock_s3_get_response = {"Body": io.BytesIO(json.dumps(expected_mips_dict_raw).encode())}
+mock_s3_get_response = {"Body": io.BytesIO(json.dumps(expected_mip_dict_raw).encode())}
 
 mock_s3_put_response = {}
 
 
-expected_mips_dict_raw_limit = {
+expected_mip_dict_raw_limit = {
     "12345600": "Program Part A",
     "12345601": "Program Part B",
 }
 
-expected_mips_dict_processed = {
+expected_mip_dict_processed = {
     "000000": "No Program",
     "123456": "Program Part A",
     "234567": "Other Program",
@@ -165,7 +165,7 @@ expected_mips_dict_processed = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_other = {
+expected_mip_dict_processed_other = {
     "000000": "No Program",
     "000001": "Other",
     "123456": "Program Part A",
@@ -175,7 +175,7 @@ expected_mips_dict_processed_other = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_no = {
+expected_mip_dict_processed_no = {
     "123456": "Program Part A",
     "234567": "Other Program",
     "345678": "Special: @Symbols Program",
@@ -183,7 +183,7 @@ expected_mips_dict_processed_no = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_other_no = {
+expected_mip_dict_processed_other_no = {
     "000001": "Other",
     "123456": "Program Part A",
     "234567": "Other Program",
@@ -192,7 +192,7 @@ expected_mips_dict_processed_other_no = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_inactive = {
+expected_mip_dict_processed_inactive = {
     "000000": "No Program",
     "123456": "Program Part A",
     "234567": "Other Program",
@@ -202,12 +202,12 @@ expected_mips_dict_processed_inactive = {
     "990300": "Platform Infrastructure",
 }
 
-expected_mips_dict_processed_limit = {
+expected_mip_dict_processed_limit = {
     "000000": "No Program",
     "123456": "Program Part A",
 }
 
-expected_mips_dict_processed_priority_codes = {
+expected_mip_dict_processed_priority_codes = {
     "000000": "No Program",
     "54321": "Inactive",
     "123456": "Program Part A",
@@ -323,13 +323,13 @@ def test_secrets(mocker):
     # stub ssm client
     mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
     ssm = boto3.client("ssm")
-    mips_api.ssm_client = ssm
+    mip_api.ssm.ssm_client = ssm
     with Stubber(ssm) as _stub:
         # inject mock parameters
         _stub.add_response("get_parameters_by_path", mock_ssm_params)
 
         # assert secrets were collected
-        secrets = mips_api.collect_secrets(ssm_path)
+        secrets = mip_api.ssm.get_secrets(ssm_path)
         assert secrets == mock_secrets
 
 
@@ -338,7 +338,7 @@ def test_no_secrets(mocker):
     # stub ssm client
     mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
     ssm = boto3.client("ssm")
-    mips_api.ssm_client = ssm
+    mip_api.ssm.ssm_client = ssm
     with Stubber(ssm) as _stub:
         # raise exception getting parameters
         _stub.add_client_error(
@@ -347,7 +347,7 @@ def test_no_secrets(mocker):
 
         # assert Exception is raised
         with pytest.raises(Exception):
-            secrets = mips_api.collect_secrets(ssm_path)
+            secrets = mip_api.ssm.get_secrets(ssm_path)
 
 
 def test_bad_secrets(mocker):
@@ -355,14 +355,14 @@ def test_bad_secrets(mocker):
     # stub ssm client
     mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
     ssm = boto3.client("ssm")
-    mips_api.ssm_client = ssm
+    mip_api.ssm.ssm_client = ssm
     with Stubber(ssm) as _stub:
         # raise exception getting parameters
         _stub.add_response("get_parameters_by_path", mock_ssm_params_bad)
 
         # assert Exception is raised
         with pytest.raises(Exception):
-            secrets = mips_api.collect_secrets(ssm_path)
+            secrets = mip_api.ssm.get_secrets(ssm_path)
 
 
 def test_upstream(mocker, requests_mock):
@@ -376,20 +376,20 @@ def test_upstream(mocker, requests_mock):
     """
 
     # inject mock responses into `requests`
-    login_mock = requests_mock.post(mips_api._mips_url_login, json=mock_token)
+    login_mock = requests_mock.post(mip_api.upstream.mip_url_login, json=mock_token)
     segment_mock = requests_mock.get(
-        mips_api._mips_url_coa_segments, json=mock_segments
+        mip_api.upstream.mip_url_coa_segments, json=mock_segments
     )
     account_mock = requests_mock.get(
-        mips_api._mips_url_coa_accounts, json=mock_accounts
+        mip_api.upstream.mip_url_coa_accounts, json=mock_accounts
     )
-    logout_mock = requests_mock.post(mips_api._mips_url_logout)
+    logout_mock = requests_mock.post(mip_api.upstream.mip_url_logout)
 
-    # get chart of accounts from mips
-    mips_dict = mips_api._upstream_requests(org_name, mock_secrets)
+    # get chart of accounts from mip
+    mip_dict = mip_api.upstream.program_chart(org_name, mock_secrets)
 
     # assert expected data
-    assert mips_dict == expected_mips_dict_raw
+    assert mip_dict == expected_mip_dict_raw
 
     # assert all mock urls were called
     assert login_mock.call_count == 1
@@ -400,10 +400,10 @@ def test_upstream(mocker, requests_mock):
     # begin a second test with an alternate requests response
 
     # inject new mock response with an Exception
-    requests_mock.get(mips_api._mips_url_coa_segments, exc=Exception)
+    requests_mock.get(mip_api.upstream.mip_url_coa_segments, exc=Exception)
 
     # assert logout is called when an exception is raised
-    mips_api._upstream_requests(org_name, mock_secrets)
+    mip_api.upstream.program_chart(org_name, mock_secrets)
     assert logout_mock.call_count == 2
 
 
@@ -412,11 +412,11 @@ def test_cache_read(mocker):
     # stub s3 client
     mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
     s3 = boto3.client("s3")
-    mips_api.s3_client = s3
+    mip_api.s3.s3_client = s3
     with Stubber(s3) as _stub:
         _stub.add_response("get_object", mock_s3_get_response)
-        found = mips_api._s3_cache_read(s3_bucket, s3_path)
-        assert found == expected_mips_dict_raw
+        found = mip_api.s3.cache_read(s3_bucket, s3_path)
+        assert found == expected_mip_dict_raw
 
 
 def test_cache_write(mocker):
@@ -424,59 +424,59 @@ def test_cache_write(mocker):
     # stub s3 client
     mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
     s3 = boto3.client("s3")
-    mips_api.s3_client = s3
+    mip_api.s3.s3_client = s3
     with Stubber(s3) as _stub:
         _stub.add_response("put_object", mock_s3_put_response)
 
         # assert no exception is raised
-        mips_api._s3_cache_write(expected_mips_dict_raw, s3_bucket, s3_path)
+        mip_api.s3.cache_write(expected_mip_dict_raw, s3_bucket, s3_path)
 
 
 @pytest.mark.parametrize(
     "upstream_response,cache_response",
     [
-        (expected_mips_dict_raw, None),
-        (None, expected_mips_dict_raw),
-        (expected_mips_dict_raw, expected_mips_dict_raw),
+        (expected_mip_dict_raw, None),
+        (None, expected_mip_dict_raw),
+        (expected_mip_dict_raw, expected_mip_dict_raw),
     ],
 )
 def test_chart(mocker, upstream_response, cache_response):
     """Test chart_cache() with no upstream response"""
     mocker.patch(
-        "mips_api._upstream_requests",
+        "mip_api.upstream.program_chart",
         autospec=True,
         return_value=upstream_response,
     )
     mocker.patch(
-        "mips_api._s3_cache_read",
+        "mip_api.s3.cache_read",
         autospec=True,
         return_value=cache_response,
     )
     write_mock = mocker.patch(
-        "mips_api._s3_cache_write",
+        "mip_api.s3.cache_write",
         autospec=True,
     )
 
-    found_dict = mips_api.chart_cache(org_name, mock_secrets, s3_bucket, s3_path)
-    assert found_dict == expected_mips_dict_raw
+    found_dict = mip_api.chart.get_chart(org_name, mock_secrets, s3_bucket, s3_path)
+    assert found_dict == expected_mip_dict_raw
 
 
 def test_chart_invalid(mocker):
     """Test chart_cache() with no valid response found"""
     mocker.patch(
-        "mips_api._upstream_requests",
+        "mip_api.upstream.program_chart",
         autospec=True,
         return_value=None,
     )
     mocker.patch(
-        "mips_api._s3_cache_read",
+        "mip_api.s3.cache_read",
         autospec=True,
         side_effect=Exception,
     )
 
     # assert that we raise a ValueError
     with pytest.raises(ValueError):
-        found_dict = mips_api.chart_cache(org_name, mock_secrets, s3_bucket, s3_path)
+        found_dict = mip_api.chart.get_chart(org_name, mock_secrets, s3_bucket, s3_path)
 
 
 @pytest.mark.parametrize(
@@ -490,32 +490,32 @@ def test_chart_invalid(mocker):
     ],
 )
 def test_parse_codes(code_str, code_list):
-    parsed_omit_codes = mips_api._parse_codes(code_str)
+    parsed_omit_codes = mip_api.util.parse_codes(code_str)
     assert parsed_omit_codes == code_list
 
 
 @pytest.mark.parametrize(
     "params,expected_dict",
     [
-        ({}, expected_mips_dict_processed),
-        (mock_foo_param, expected_mips_dict_processed),
-        (mock_other_param, expected_mips_dict_processed_other),
-        (mock_inactive_param, expected_mips_dict_processed_inactive),
-        (mock_no_program_param, expected_mips_dict_processed_no),
-        (mock_priority_param, expected_mips_dict_processed),
+        ({}, expected_mip_dict_processed),
+        (mock_foo_param, expected_mip_dict_processed),
+        (mock_other_param, expected_mip_dict_processed_other),
+        (mock_inactive_param, expected_mip_dict_processed_inactive),
+        (mock_no_program_param, expected_mip_dict_processed_no),
+        (mock_priority_param, expected_mip_dict_processed),
         (
             mock_priority_param | mock_inactive_param,
-            expected_mips_dict_processed_priority_codes,
+            expected_mip_dict_processed_priority_codes,
         ),
         (
             mock_other_param | mock_no_program_param,
-            expected_mips_dict_processed_other_no,
+            expected_mip_dict_processed_other_no,
         ),
     ],
 )
 def test_process_chart(params, expected_dict):
-    processed_chart = mips_api.process_chart(
-        params, expected_mips_dict_raw, expected_omit_codes, other_code, no_program_code
+    processed_chart = mip_api.chart.process_chart(
+        params, expected_mip_dict_raw, expected_omit_codes, other_code, no_program_code
     )
     assert json.dumps(processed_chart) == json.dumps(expected_dict)
 
@@ -534,7 +534,7 @@ def test_process_chart(params, expected_dict):
     ],
 )
 def test_param_bool(params, expected_bool):
-    found_filter_bool = mips_api._param_bool(params, "test")
+    found_filter_bool = mip_api.util._param_bool(params, "test")
     assert found_filter_bool == expected_bool
 
 
@@ -548,7 +548,7 @@ def test_param_bool(params, expected_bool):
     ],
 )
 def test_param_limit_int(params, expected_int):
-    found_limit_int = mips_api._param_limit_int(params)
+    found_limit_int = mip_api.util.param_limit_int(params)
     assert found_limit_int == expected_int
 
 
@@ -561,24 +561,24 @@ def test_param_limit_int(params, expected_int):
 )
 def test_param_limit_int_err(params):
     with pytest.raises(ValueError):
-        found_limit_int = mips_api._param_limit_int(params)
+        found_limit_int = mip_api.util.param_limit_int(params)
 
 
 @pytest.mark.parametrize(
     "params,input_chart,expected_chart",
     [
-        ({}, expected_mips_dict_processed, expected_mips_dict_processed),
-        (mock_foo_param, expected_mips_dict_raw, expected_mips_dict_raw),
-        (mock_limit_param, expected_mips_dict_raw, expected_mips_dict_raw_limit),
+        ({}, expected_mip_dict_processed, expected_mip_dict_processed),
+        (mock_foo_param, expected_mip_dict_raw, expected_mip_dict_raw),
+        (mock_limit_param, expected_mip_dict_raw, expected_mip_dict_raw_limit),
         (
             mock_limit_param | mock_foo_param,
-            expected_mips_dict_processed,
-            expected_mips_dict_processed_limit,
+            expected_mip_dict_processed,
+            expected_mip_dict_processed_limit,
         ),
     ],
 )
 def test_limit_chart(params, input_chart, expected_chart):
-    processed_chart = mips_api.limit_chart(params, input_chart)
+    processed_chart = mip_api.chart.limit_chart(params, input_chart)
     assert processed_chart == expected_chart
 
 
@@ -594,13 +594,13 @@ def test_tags(params, expected_list):
     """Testing building tag list from collected chart of accounts"""
 
     # assert expected tag list
-    tag_list = mips_api.list_tags(params, expected_mips_dict_processed)
+    tag_list = mip_api.chart.list_tags(params, expected_mip_dict_processed)
     assert tag_list == expected_list
 
 
 def test_lambda_handler_no_env(invalid_event):
     """Test lambda handler with no environment variables set"""
-    ret = mips_api.lambda_handler(invalid_event, None)
+    ret = mip_api.lambda_handler(invalid_event, None)
     json_body = json.loads(ret["body"])
     assert json_body["error"].startswith("The environment variable") == True
     assert ret["statusCode"] == 500
@@ -623,16 +623,16 @@ def _test_with_env(mocker, event, code, body=None, error=None):
     }
     mocker.patch.dict(os.environ, env_vars)
 
-    # mock out collect_secrets() with mock secrets
-    mocker.patch("mips_api.collect_secrets", autospec=True, return_value=mock_secrets)
+    # mock out get_secrets() with mock secrets
+    mocker.patch("mip_api.ssm.get_secrets", autospec=True, return_value=mock_secrets)
 
     # mock out chart_cache() with mock chart
     mocker.patch(
-        "mips_api.chart_cache", autospec=True, return_value=expected_mips_dict_raw
+        "mip_api.chart.get_chart", autospec=True, return_value=expected_mip_dict_raw
     )
 
     # test event
-    ret = mips_api.lambda_handler(event, None)
+    ret = mip_api.lambda_handler(event, None)
     json_body = json.loads(ret["body"])
 
     if error is not None:
@@ -659,7 +659,7 @@ def test_lambda_handler_empty_event(mocker):
 def test_lambda_handler_accounts(accounts_event, mocker):
     """Test chart-of-accounts event"""
 
-    _test_with_env(mocker, accounts_event, 200, body=expected_mips_dict_processed)
+    _test_with_env(mocker, accounts_event, 200, body=expected_mip_dict_processed)
 
 
 def test_lambda_handler_tags(tags_event, mocker):
