@@ -9,7 +9,15 @@ LOG.setLevel(logging.DEBUG)
 
 
 def lambda_handler(event, context):
-    """Sample pure Lambda function
+    """Entry Point for Lambda
+
+    Collect configuration from environment variables and query-string parameters,
+    determine data requested based on the API endpoint called, and finally
+    present the requested data in the desired format.
+
+    Note: The Python process will continue to run for the entire lifecycle of
+    the Lambda execution environment (15 minutes). Subsequent Lambda
+    runs will re-enter this function.
 
     Parameters
     ----------
