@@ -105,40 +105,28 @@ def process_chart(params, chart_dict, omit_list, other, no_program):
 
             if priority_codes is not None:
                 if short in priority_codes:
-                    # Since Python 3.7, python dictionaries preserve insertion
-                    # order, so to prepend an item to the top of the dictionary,
-                    # we create a new dictionary inserting the target code first,
-                    # then add the previous output, and finally save the new
-                    # dictionary as our output dictionary.
-                    new_chart = {short: name}
-                    new_chart.update(out_chart)
-                    out_chart = new_chart
-                    found_codes.append(short)
+                    out_chart = util.dict_prepend(out_chart, short, name)
                 else:
                     out_chart[short] = name
-                    found_codes.append(short)
             else:
                 out_chart[short] = name
-                found_codes.append(short)
+            found_codes.append(short)
 
     # inject "other" code
     if util.param_other_bool(params):
-        new_chart = {other: "Other"}
-        new_chart.update(out_chart)
-        out_chart = new_chart
+        out_chart = util.dict_prepend(out_chart, other, "Other")
 
     # inject "no program" code
     if util.param_no_program_bool(params):
-        new_chart = {no_program: "No Program"}
-        new_chart.update(out_chart)
-        out_chart = new_chart
+        out_chart = util.dict_prepend(out_chart, no_program, "No Program")
 
     return out_chart
 
 
 def limit_chart(params, chart_dict):
     """
-    Optionally limit the size of the chart based on a query-string parameter.
+    Optionally limit the size of the chart to the given number of high-
+    priority items based on a query-string parameter.
     """
 
     # if a 'limit' query-string parameter is defined, "slice" the dictionary
