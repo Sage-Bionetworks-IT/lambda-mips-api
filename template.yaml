@@ -17,7 +17,7 @@ Parameters:
     Type: CommaDelimitedList
     Description: List of role ARNs to manage the encryption key
     Default: ""
-  MipsOrganization:
+  MipOrganization:
     Type: String
     Description: Log in to this organization in the finance system
   SsmParamPrefix:
@@ -82,9 +82,12 @@ Resources:
             Action:
               - s3:GetObject
               - s3:PutObject
+              - s3:ListBucket
             Principal:
               AWS: !GetAtt FunctionRole.Arn
-            Resource: !Sub "${CacheBucket.Arn}/*"
+            Resource:
+              - !Sub "${CacheBucket.Arn}/*"
+              - !Sub "${CacheBucket.Arn}"
 
   Function:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -96,19 +99,25 @@ Resources:
         Variables:
           ApiChartOfAccounts: '/accounts'
           ApiValidTags: '/tags'
-          MipsOrg: !Ref MipsOrganization
+          ApiTrialBalances: '/balances'
+          MipOrg: !Ref MipOrganization
           SsmPath: !Ref SsmParamPrefix
           CodesToOmit: !Ref CodesToOmit
           NoProgramCode: !Ref NoProgramCode
           OtherCode: !Ref OtherCode
           CacheBucket: !Ref CacheBucket
-          CacheBucketPath: 'mip/coa.json'
+          CacheBucketPrefix: 'mip-cache/'
       Role: !GetAtt FunctionRole.Arn
       Events:
         ChartOfAccounts:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             Path: '/accounts'
+            Method: get
+        TrialBalances:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: '/balances'
             Method: get
         ValidTags:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
@@ -174,8 +183,8 @@ Resources:
         DefaultTTL: !Ref CacheTTL
         ParametersInCacheKeyAndForwardedToOrigin:
           EnableAcceptEncodingGzip: true
-          # Don't pass any client cookies, headers, or query strings
-          # to the lambda because we don't need them
+          # Only pass query-string parameters to the lambda,
+          # not cookies or headers because we don't use them
           CookiesConfig:
             CookieBehavior: none
           HeadersConfig:
@@ -212,6 +221,7 @@ Resources:
             Action:
               - 'kms:Create*'
               - 'kms:Encrypt'
+              - 'kms:ReEncrypt*'
               - 'kms:Decrypt'
               - 'kms:Describe*'
               - 'kms:Enable*'
@@ -239,6 +249,9 @@ Outputs:
   ApiRouteChartOfAccounts:
     Description: "CloudFront URL for the full chart of accounts"
     Value: !Sub "https://${CloudFrontCache.DomainName}/accounts"
+  ApiRouteTrialBalances:
+    Description: "CloudFront URL for trial balances"
+    Value: !Sub "https://${CloudFrontCache.DomainName}/balances"
   ApiRouteValidTags:
     Description: "CloudFront URL for listing valid CostCenter tag values"
     Value: !Sub "https://${CloudFrontCache.DomainName}/tags"
