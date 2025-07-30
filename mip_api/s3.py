@@ -13,6 +13,19 @@ s3_client = None
 def _read(bucket, path):
     """
     Read MIP response from S3 cache object
+
+    Parameters
+    ----------
+    bucket: str
+        S3 bucket name
+
+    path: str
+        S3 object path
+
+    Returns
+    -------
+    str
+        Parsed JSON data stored in S3 object
     """
     global s3_client
     if s3_client is None:
@@ -25,6 +38,21 @@ def _read(bucket, path):
 def _write(data, bucket, path):
     """
     Write MIP response to S3 cache object
+
+    Parameters
+    ----------
+    data: any
+        Data to store in S3 object (formatted as JSON).
+
+    bucket: str
+        S3 bucket name
+
+    path: str
+        S3 object path
+
+    Returns
+    -------
+    None
     """
     global s3_client
     if s3_client is None:
@@ -46,6 +74,23 @@ def cache(upstream_data, bucket, path):
     that every PUT request will create a new S3 object. In order to minimize
     the number of objects in the bucket, read the cache value on every run and
     only update the S3 object if it changes.
+
+    Parameters
+    ----------
+    upstream_data: any
+        Upstream API response to cache in S3. May be empty after receiving
+        a failure from the upstream API.
+
+    bucket: str
+        S3 bucket name
+
+    path: str
+        S3 object path
+
+    Returns
+    -------
+    any
+       The cached value, possibly after being updated.
     """
 
     # always read cached value

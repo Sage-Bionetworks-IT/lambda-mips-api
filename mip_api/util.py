@@ -108,6 +108,20 @@ def _param_priority_list(params):
 
 
 def params_dict(event):
+    """
+    Parse query-string parameters from the trigger event.
+
+    Parameters
+    ----------
+        event: dict
+            The event passed to the lambda handler by the execution
+            environment.
+
+    Returns
+    -------
+    dict
+        Dictionary of configuration parameters parsed from the trigger event.
+    """
     _params = {}
     if "queryStringParameters" in event:
         _params = event["queryStringParameters"]
@@ -137,6 +151,17 @@ def target_period(when=None):
     This supports two use cases: getting the balance activity for the current
     month-to-date, and also re-processing past months because those periods
     can remain active for many months.
+
+    Parameters
+    ----------
+    when: str
+        The target date to calculate the period for in ISO 8601 format (YYYY-MM-DD).
+
+    Returns
+    -------
+    (str, str)
+        A tuple containing the start and end date of the calculated target
+        period in ISO-8601 format (YYYY-MM-DD).
     """
 
     if when is None:

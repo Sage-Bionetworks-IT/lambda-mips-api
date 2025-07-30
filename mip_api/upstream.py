@@ -22,9 +22,21 @@ mip_url_current_balance = (
 @backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _login(creds):
     """
+    Login to upstream API.
+
     Wrap login request with backoff decorator, using exponential backoff
     and running for at most 11 seconds. With a connection timeout of 4
     seconds, this allows two attempts.
+
+    Parameters
+    ----------
+    creds : dict
+        Authentication credentials to log in to upstream API.
+
+    Returns
+    -------
+    str
+        Authorization token.
     """
     timeout = 4
     LOG.info("Logging in to upstream API")
@@ -42,6 +54,8 @@ def _login(creds):
 @backoff.on_exception(backoff.fibo, (RequestError, RequestException), max_time=28)
 def _logout(access_token):
     """
+    Logout from upstream API.
+
     Wrap logout request with backoff decorator, using fibonacci backoff
     and running for at most 28 seconds. With a connection timeout of 6
     seconds, this allows three attempts.
@@ -50,6 +64,15 @@ def _logout(access_token):
     failing to log out after successfully logging in will lock us out of
     the API; but CloudFront will only wait a maximum of 60 seconds for a
     response from this lambda.
+
+    Parameters
+    ----------
+    access_token : str
+        Authorization token.
+
+    Returns
+    -------
+    None
     """
     timeout = 6
     LOG.info("Logging out of upstream API")
@@ -64,10 +87,25 @@ def _logout(access_token):
 @backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _get_segment_id(access_token, segment_name):
     """
+    Get segment ID for the given segment name.
+
     Wrap the request for chart segment IDs with backoff decorator, using
     exponential backoff and running for at most 11 seconds. With a
     connection timeout of 4 seconds, this allows two attempts.
     Only return the ID of the "Program" segment needed for filtering.
+
+    Parameters
+    ----------
+    access_token : str
+        Authorization token.
+
+    segment_name : str
+        Segment name.
+
+    Returns
+    -------
+    int
+        Segment ID.
     """
     timeout = 4
     LOG.info("Getting chart segments")
@@ -82,7 +120,11 @@ def _get_segment_id(access_token, segment_name):
     json_response = segment_response.json()
     LOG.debug(f"Raw segment json: {json_response}")
 
-    # get the segment ID for the "Program" segment
+    # The upstream API re-uses the key `COA_SEGID` both as a
+    # top-level key mapped to the list of segment definitions,
+    # and also as a sub-key within each segment definition to
+    # provide the specific segment ID.
+    # See test_handler.mock_segments for an example API response.
     seg_id = None
     for segment in json_response["COA_SEGID"]:
         if segment["TITLE"] == segment_name:
@@ -98,10 +140,29 @@ def _get_segment_id(access_token, segment_name):
 @backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _get_chart_segment(access_token, seg_id, hide_inactive):
     """
+    Get chart of accounts for the given segment, optionally excluding
+    inactive accounts.
+
     Wrap the request for chart of accounts with backoff decorator, using
     exponential backoff and running for at most 11 seconds. With a
     connection timeout of 4 seconds, this allows two attempts.
     Only return results for active accounts in the program segment.
+
+    Parameters
+    ----------
+    access_token : str
+        Authorization token.
+
+    seg_id : int
+        Segment ID.
+
+    hide_inactive : bool
+        Exclude inactive accounts.
+
+    Returns
+    -------
+    dict
+       Dictionary mapping account codes to their names.
     """
     timeout = 4
     LOG.info("Getting chart of accounts")
@@ -116,13 +177,18 @@ def _get_chart_segment(access_token, seg_id, hide_inactive):
     json_response = account_response.json()
     LOG.debug(f"Raw account json: {json_response}")
 
+    # The upstream API re-uses the key `COA_SEGID` as both a top-level
+    # key mapped to a list of account definitions, and also as a sub-key
+    # within each account definition to provide the segment
+    # See test_handler.mock_accounts for an example API response.
     accounts = {}
     for account in json_response["COA_SEGID"]:
         if account["COA_SEGID"] == seg_id:
+            title = account["COA_TITLE"]
             if hide_inactive and account["COA_STATUS"] != "A":
-                LOG.info(f"Hiding inactive account: {account['COA_TITLE']}")
+                LOG.info(f"Hiding inactive account: {title}")
                 continue
-            accounts[account["COA_CODE"]] = account["COA_TITLE"]
+            accounts[account["COA_CODE"]] = title
 
     LOG.info(f"Chart of accounts: {accounts}")
     return accounts
@@ -130,6 +196,26 @@ def _get_chart_segment(access_token, seg_id, hide_inactive):
 
 @backoff.on_exception(backoff.expo, (RequestError, RequestException), max_time=11)
 def _get_balance(access_token, period_from, period_to):
+    """
+    Get account balances for the given period.
+
+    Parameters
+    ----------
+    access_token : str
+        Authorization token.
+
+    period_from : str
+        Start date of activity period in ISO-8601 format (YYYY-MM-DD).
+
+    period_to : str
+        End date of activity period in ISO-8601 format (YYYY-MM-DD).
+
+    Returns
+    -------
+    dict
+        Upstream API response.
+
+    """
     timeout = 4
     LOG.info("Getting balances")
 
@@ -180,6 +266,25 @@ def _get_balance(access_token, period_from, period_to):
 def get_chart(org_name, secrets, segment, hide_inactive):
     """
     Log into MIPS, get the chart of accounts, and log out
+
+    Parameters
+    ----------
+    org_name : str
+        MIP Cloud organization name.
+
+    secrets : dict
+        MIP Cloud authentication credentials.
+
+    segment : str
+        Segment name. Allowed values: ['Program', 'GL']
+
+    hide_inactive : bool
+        Exclude inactive accounts.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping account codes to their names.
     """
 
     chart_dict = {}
@@ -217,6 +322,26 @@ def get_chart(org_name, secrets, segment, hide_inactive):
 
 
 def trial_balances(org_name, secrets, when=None):
+    """
+    Get account balances for the given period.
+
+    Parameters
+    ----------
+    org_name : str
+        MIP Cloud organization name.
+
+    secrets : dict
+        MIP Cloud authentication credentials.
+
+    when : str
+        Target date for activity period in ISO 8601 format (YYYY-MM-DD).
+
+    Returns
+    -------
+    dict
+        Upstream API response with injected period dates.
+
+    """
     bal_dict = {}
     access_token = None
 
