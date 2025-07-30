@@ -9,17 +9,30 @@ LOG.setLevel(logging.DEBUG)
 
 def get_program_chart(org_name, secrets, bucket, path, hide_inactive):
     """
-    Access the Chart of Accounts from MIP Cloud, and implement a write-through
-    cache of successful responses to tolerate long-term faults in the upstream
-    API.
+    Access the Chart of Accounts from MIP Cloud for the Program segment
 
-    A successful API response will be stored in S3 indefinitely, to be retrieved
-    and used in the case of an API failure.
+    Parameters
+    ----------
+    org_name : str
+        MIP Cloud organization name
 
-    The S3 bucket has versioning enabled for disaster recovery, but this means
-    that every PUT request will create a new S3 object. In order to minimize
-    the number of objects in the bucket, read the cache value on every run and
-    only update the S3 object if it changes.
+    secrets : dict
+        MIP Cloud authentication credentials
+
+    bucket : str
+        S3 bucket name
+
+    path : str
+        S3 path
+
+    hide_inactive: bool
+        Omit inactive accounts from output
+
+
+    Returns
+    -------
+    dict
+        Dictionary mapping program account codes to their names.
     """
 
     # get the upstream API response
@@ -33,17 +46,30 @@ def get_program_chart(org_name, secrets, bucket, path, hide_inactive):
 
 def get_gl_chart(org_name, secrets, bucket, path, hide_inactive):
     """
-    Access the Chart of Accounts from MIP Cloud, and implement a write-through
-    cache of successful responses to tolerate long-term faults in the upstream
-    API.
+    Access the Chart of Accounts from MIP Cloud for the GL segment
 
-    A successful API response will be stored in S3 indefinitely, to be retrieved
-    and used in the case of an API failure.
+    Parameters
+    ----------
+    org_name : str
+        MIP Cloud organization name
 
-    The S3 bucket has versioning enabled for disaster recovery, but this means
-    that every PUT request will create a new S3 object. In order to minimize
-    the number of objects in the bucket, read the cache value on every run and
-    only update the S3 object if it changes.
+    secrets : dict
+        MIP Cloud authentication credentials
+
+    bucket : str
+        S3 bucket name
+
+    path : str
+        S3 path
+
+    hide_inactive: bool
+        Omit inactive accounts from output
+
+
+    Returns
+    -------
+    dict
+        Dictionary mapping GL account codes to their names.
     """
 
     # get the upstream API response
@@ -62,7 +88,31 @@ def process_chart(chart_dict, omit_list, other, no_program, params):
 
     5-digit codes are inactive and should be ignored in most cases.
     8-digit codes are active, but only the first 6 digits are significant,
-      i.e. 12345601 and 12345602 should be deduplicated as 123456.
+    i.e. 12345601 and 12345602 should be deduplicated as 123456.
+
+    Parameters
+    ----------
+
+    chart_dict : dict
+        Dictionary mapping program account codes to their names.
+
+    omit_list : list
+        List of program codes to omit.
+
+    other : str
+        Program code to use for 'Other'.
+
+    no_program : str
+        Program code to use for 'No Program'.
+
+    params : dict
+        Dictionary of configuration parameters.
+
+    Returns
+    -------
+    dict
+        Processed chart of accounts with optional codes for 'Other'
+        and 'No Program' added.
     """
 
     # deduplicate on shortened numeric codes
@@ -121,6 +171,14 @@ def limit_chart(chart_dict, limit):
     """
     Optionally limit the size of the chart to the given number of high
     priority items based on a query-string parameter.
+
+    Parameters
+    ----------
+    chart_dict : dict
+        Dictionary mapping program account codes to their names.
+
+    limit : int
+        Number of high priority accounts to return.
     """
 
     # "slice" the dictionary
@@ -136,11 +194,17 @@ def limit_chart(chart_dict, limit):
 
 def list_tags(chart_dict):
     """
-    Generate a list of valid AWS tags. Only active codes are listed.
+    Generate a list of valid AWS tags from the chart of accounts.
+    The valid string format is `{Program Name} / {Program Code}`.
 
-    The string format is `{Program Name} / {Program Code}`.
+    Parameters
+    ----------
+    chart_dict : dict
+        Dictionary mapping program account codes to their names.
 
     Returns
+    -------
+    list
         A list of strings.
     """
 

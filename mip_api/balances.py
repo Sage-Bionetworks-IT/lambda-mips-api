@@ -10,7 +10,26 @@ LOG.setLevel(logging.DEBUG)
 
 
 def get_balances(org_name, secrets, bucket, path, when=None):
-    # get the upstream API response
+    """
+    Get trial balances from MIP Cloud and cache a successful response in S3.
+
+    Parameters
+    ----------
+    org_name : str
+        MIP Cloud organization name
+
+    secrets : dict
+        MIP Cloud authentication credentials
+
+    bucket : str
+        S3 bucket name
+
+    path : str
+        S3 object path
+
+    when : str
+        Activity period target date in ISO 8601 format (YYYY-MM-DD)
+    """
     LOG.info("Read balances from upstream API")
     upstream_dict = upstream.trial_balances(org_name, secrets, when)
     LOG.debug(f"Upstream API response: {upstream_dict}")
@@ -20,6 +39,27 @@ def get_balances(org_name, secrets, bucket, path, when=None):
 
 
 def process_balance(bal_dict, coa_dict):
+    """
+    Process upstream API response into a list of lists representing
+    rows in a CSV file.
+
+    Parameters
+    ----------
+    bal_dict : dict
+        Upstream API response
+
+    coa_dict : dict
+        Chart of accounts
+
+    Returns
+    -------
+    list
+        List of lists representing rows in CSV file.
+        Headers:
+            'AccountNumber', 'AccountName', 'PeriodStart', 'PeriodEnd',
+            'StartBalance', 'Activity', 'EndBalance'
+
+    """
 
     # check for success
     if "executionResult" not in bal_dict:
@@ -96,6 +136,22 @@ def process_balance(bal_dict, coa_dict):
 
 
 def format_csv(bal_dict, coa_dict):
+    """
+    Process upstream API response into string contents of a CSV file.
+
+    Parameters
+    ----------
+    bal_dict : dict
+        Upstream API response
+
+    coa_dict : dict
+        Chart of accounts
+
+    Returns
+    -------
+    str
+        String contents of CSV file.
+    """
     csv_out = io.StringIO()
     csv_writer = csv.writer(csv_out)
 
