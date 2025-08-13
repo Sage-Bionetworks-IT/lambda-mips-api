@@ -99,6 +99,7 @@ Resources:
         Variables:
           ApiChartOfAccounts: '/accounts'
           ApiValidTags: '/tags'
+          ApiTrialBalances: '/balances'
           MipOrg: !Ref MipOrganization
           SsmPath: !Ref SsmParamPrefix
           CodesToOmit: !Ref CodesToOmit
@@ -112,6 +113,11 @@ Resources:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             Path: '/accounts'
+            Method: get
+        TrialBalances:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: '/balances'
             Method: get
         ValidTags:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
@@ -243,6 +249,9 @@ Outputs:
   ApiRouteChartOfAccounts:
     Description: "CloudFront URL for the full chart of accounts"
     Value: !Sub "https://${CloudFrontCache.DomainName}/accounts"
+  ApiRouteTrialBalances:
+    Description: "CloudFront URL for trial balances"
+    Value: !Sub "https://${CloudFrontCache.DomainName}/balances"
   ApiRouteValidTags:
     Description: "CloudFront URL for listing valid CostCenter tag values"
     Value: !Sub "https://${CloudFrontCache.DomainName}/tags"

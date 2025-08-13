@@ -1,7 +1,6 @@
-import json
 import logging
 
-from mip_api import chart, s3, ssm, upstream, util
+from mip_api import balances, chart, s3, ssm, upstream, util
 
 
 LOG = logging.getLogger(__name__)
@@ -51,6 +50,7 @@ def lambda_handler(event, context):
 
         api_route_coa = util.get_os_var("ApiChartOfAccounts")
         api_route_tags = util.get_os_var("ApiValidTags")
+        api_route_balances = util.get_os_var("ApiTrialBalances")
 
         _to_omit = util.get_os_var("CodesToOmit")
         omit_codes_list = util.parse_codes(_to_omit)
@@ -71,12 +71,43 @@ def lambda_handler(event, context):
             s3_path_program_coa += "-full"
         s3_path_program_coa += ".json"
 
+        s3_path_balances = s3_prefix + "balances"
+        if not hide_inactive:
+            s3_path_balances += "-full"
+        s3_path_balances += ".json"
+
         # get secure parameters
         ssm_secrets = ssm.get_secrets(ssm_path)
 
         # parse the path and return appropriate data
         if "path" in event:
             event_path = event["path"]
+
+            if event_path == api_route_balances:
+                # get chart of general ledger accounts
+                gl_chart = chart.get_gl_chart(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_path_gl_coa,
+                    hide_inactive,
+                )
+                LOG.debug(f"Raw chart data: {gl_chart}")
+
+                # get balance data
+                raw_bal = balances.get_balances(
+                    mip_org,
+                    ssm_secrets,
+                    s3_bucket,
+                    s3_path_balances,
+                    params["date"],
+                )
+
+                # combine them into CSV output
+                balances_csv = balances.format_csv(raw_bal, gl_chart)
+                return util.build_return_text(200, balances_csv)
+
+            # common processing for '/accounts' and '/tags'
 
             # get chart of Program accounts
             _raw_program_chart = chart.get_program_chart(
