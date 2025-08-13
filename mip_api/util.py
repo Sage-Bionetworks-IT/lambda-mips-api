@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import date, timedelta
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
@@ -11,6 +12,14 @@ def build_return_json(code, body):
         "statusCode": code,
         "body": json.dumps(body, indent=2),
         "headers": {"Content-Type": "application/json"},
+    }
+
+
+def build_return_text(code, body):
+    return {
+        "statusCode": code,
+        "body": body,
+        "headers": {"Content-Type": "test/csv"},
     }
 
 
@@ -128,3 +137,56 @@ def params_dict(event):
         "date": _param_date_str(_params),
     }
     return params
+
+
+def target_period(when=None):
+    """
+    Calculate the target activity period for balance data based on a
+    target day. If no day is given then the current day is used.
+
+    If the target day is during the first week of the month, the target
+    activity period will be the previous month (e.g. on April 3rd the
+    period will be from March 1 through March 31). Otherwise, the period
+    will be month-to-date for the target day (e.g. on April 15th the
+    period will be from April 1st to April 15th).
+
+    This supports two use cases: getting the balance activity for the current
+    month-to-date, and also re-processing past months because those periods
+    can remain active for many months.
+
+    Parameters
+    ----------
+    when: str
+        The target date to calculate the period for in ISO 8601 format (YYYY-MM-DD).
+
+    Returns
+    -------
+    (str, str)
+        A tuple containing the start and end date of the calculated target
+        period in ISO-8601 format (YYYY-MM-DD).
+    """
+
+    if when is None:
+        target_day = date.today()
+    else:
+        target_day = date.fromisoformat(when)
+    LOG.info(f"Processing period for {target_day}")
+
+    if target_day.day <= 7:
+        # at the beginning of the month, look at previous month
+        _first = target_day.replace(day=1)  # first day of target month
+        end = _first - timedelta(days=1)  # last day of previous month
+        start = end.replace(day=1)  # first day of previous month
+
+        end_str = end.isoformat()
+        start_str = start.isoformat()
+    else:
+        # otherwise look at month-to-date
+        start = target_day.replace(day=1)
+        end_str = target_day.isoformat()
+        start_str = start.isoformat()
+
+    LOG.info(f"Start day is {start_str}")
+    LOG.info(f"End day is {end_str}")
+
+    return start_str, end_str

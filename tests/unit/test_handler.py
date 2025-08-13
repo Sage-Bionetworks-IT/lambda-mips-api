@@ -1,9 +1,9 @@
+import json
 import io
+import os
+from datetime import date
 
 import mip_api
-
-import json
-import os
 
 import boto3
 import pytest
@@ -13,6 +13,7 @@ from botocore.stub import Stubber
 # fixtures that don't need a setup function
 
 api_accounts = "/test/accounts"
+api_balances = "/test/balances"
 api_tags = "/test/tags"
 api_invalid = "/test/invalid"
 
@@ -34,6 +35,7 @@ expected_default_params = {
     "priority_codes": [],
     "show_no_program": True,
     "show_other": False,
+    "date": "",
 }
 
 org_name = "testOrg"
@@ -45,6 +47,18 @@ no_program_code = "000000"
 
 s3_bucket = "test-bucket"
 s3_path = "test-path"
+
+mock_date_early = date(2025, 5, 5)
+expected_start_date_early = "2025-04-01"
+expected_end_date_early = "2025-04-30"
+
+mock_date_late = date(2025, 5, 25)
+expected_start_date_late = "2025-05-01"
+expected_end_date_late = "2025-05-25"
+
+mock_balance_start = 9001.01
+mock_balance_activity = 101.01
+mock_balance_end = 9102.02
 
 
 expected_omit_codes = [
@@ -158,6 +172,80 @@ mock_accounts = {
     ]
 }
 
+mock_balance_invalid1 = {
+    "executionResult": "INVALID",
+}
+
+mock_balance_invalid2 = {
+    "executionResult": "SUCCESS",
+    "extraInformation": {"foo": "bar"},
+}
+
+mock_balance_success = {
+    "executionResult": "SUCCESS",
+    "extraInformation": {
+        "Level1": [
+            {
+                "DBDETAIL_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 1,
+                "DBDETAIL_SUM_DESC": "Beginning Balance",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date_early,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date_early,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_start,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_start,
+                "DBDETAIL_SUM_SEGMENT_N0": "12345600",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+            {
+                "DBDETAIL_SUM_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 2,
+                "DBDETAIL_SUM_DESC": "Current Activity",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date_early,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date_early,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_activity,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_activity,
+                "DBDETAIL_SUM_SEGMENT_N0": "12345600",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+            {
+                "DBDETAIL_SUM_SUM_CURRENCY": "USD",
+                "DBDETAIL_SUM_TYPE": 3,
+                "DBDETAIL_SUM_DESC": "Ending Balance",
+                "DBDETAIL_SUM_FROMDATE": expected_start_date_early,
+                "DBDETAIL_SUM_THRUDATE": expected_end_date_early,
+                "DBDETAIL_SUM_SRCPOSTEDAMT": mock_balance_end,
+                "DBDETAIL_SUM_POSTEDAMT": mock_balance_end,
+                "DBDETAIL_SUM_SEGMENT_N0": "12345600",
+                "DBDETAIL_SUM_SEGMENT_N1": "",
+                "DBDETAIL_SUM_SEGMENT_N2": "",
+                "DBDETAIL_SUM_SEGMENT_N3": "",
+                "DBDETAIL_SUM_SEGMENT_N4": "",
+                "DBDETAIL_SUM_SEGMENT_N5": "",
+                "DBDETAIL_SUM_SEGMENT_N6": "",
+                "DBDETAIL_SUM_SEGMENT_N7": "",
+            },
+        ]
+    },
+    "period_from": expected_start_date_early,
+    "period_to": expected_end_date_early,
+}
+
+expected_balance_dict = {
+    "period_from": expected_start_date_early,
+    "period_to": expected_end_date_early,
+}
 
 # expected internal dictionary
 expected_program_dict_raw = {
@@ -269,12 +357,37 @@ expected_tag_list_limit = [
     "Program Part A / 123456",
 ]
 
+expected_balance_rows = [
+    [
+        "AccountNumber",
+        "AccountName",
+        "PeriodStart",
+        "PeriodEnd",
+        "StartBalance",
+        "Activity",
+        "EndBalance",
+    ],
+    [
+        "12345600",
+        "Program Part A",
+        expected_start_date_early,
+        expected_end_date_early,
+        mock_balance_start,
+        mock_balance_activity,
+        mock_balance_end,
+    ],
+]
+
+expected_balance_csv = f"""AccountNumber,AccountName,PeriodStart,PeriodEnd,StartBalance,Activity,EndBalance\r
+12345600,Program Part A,{expected_start_date_early},{expected_end_date_early},{mock_balance_start},{mock_balance_activity},{mock_balance_end}\r
+"""
+
 
 def apigw_event(path, qsp=None):
     """Generates API GW Event"""
 
     if qsp is None:
-        qsp = {"foo": "bar"}
+        qsp = mock_foo_qsp_param
 
     return {
         "body": '{ "test": "body"}',
@@ -340,6 +453,11 @@ def accounts_event():
 
 
 @pytest.fixture()
+def balances_event():
+    return apigw_event(api_balances, qsp=mock_inactive_qsp_param)
+
+
+@pytest.fixture()
 def tags_event():
     return apigw_event(api_tags)
 
@@ -396,6 +514,29 @@ def test_bad_secrets(mocker):
             secrets = mip_api.ssm.get_secrets(ssm_path)
 
 
+@pytest.mark.parametrize(
+    "mock_date,expected_period",
+    [
+        (mock_date_early, (expected_start_date_early, expected_end_date_early)),
+        (mock_date_late, (expected_start_date_late, expected_end_date_late)),
+    ],
+)
+def test_periods(mocker, mock_date, expected_period):
+    """Test getting balance periods"""
+    # first, test passing in a date string
+    mock_date_str = mock_date.isoformat()
+
+    found_period = mip_api.util.target_period(mock_date_str)
+    assert found_period == expected_period
+
+    # next, mock the value of date.today
+    date_mock = mocker.patch("mip_api.util.date")
+    date_mock.today.return_value = mock_date
+
+    found_period = mip_api.util.target_period()
+    assert found_period == expected_period
+
+
 def test_upstream(mocker, requests_mock):
     """
     Test getting chart of accounts from upstream API
@@ -414,9 +555,21 @@ def test_upstream(mocker, requests_mock):
     account_mock = requests_mock.get(
         mip_api.upstream.mip_url_coa_accounts, json=mock_accounts
     )
+    balance_mock = requests_mock.post(
+        mip_api.upstream.mip_url_current_balance, json=mock_balance_success
+    )
     logout_mock = requests_mock.post(mip_api.upstream.mip_url_logout)
 
-    # get chart of accounts
+    # mock the date
+    mocker.patch(
+        "mip_api.util.target_period",
+        autospec=True,
+        return_value=(expected_start_date_early, expected_end_date_early),
+    )
+
+    # Begin happy-path tests
+
+    # get chart of program accounts
     program_dict = mip_api.upstream.get_chart(org_name, mock_secrets, "Program", True)
     assert program_dict == expected_program_dict_raw
 
@@ -426,7 +579,13 @@ def test_upstream(mocker, requests_mock):
     assert account_mock.call_count == 1
     assert logout_mock.call_count == 1
 
-    # begin a second test with an alternate requests response
+    # get trial balances
+    bal_dict = mip_api.upstream.trial_balances(org_name, mock_secrets)
+    assert bal_dict == mock_balance_success
+    assert balance_mock.call_count == 1
+    assert logout_mock.call_count == 2
+
+    # Begin error-handling test
 
     # inject new mock response with an Exception
     requests_mock.get(mip_api.upstream.mip_url_coa_segments, exc=Exception)
@@ -562,6 +721,50 @@ def test_process_chart(raw_dict, params, expected_dict):
     assert json.dumps(processed_chart) == json.dumps(expected_dict)
 
 
+def test_process_balance(mocker):
+    found_rows = mip_api.balances.process_balance(
+        mock_balance_success,
+        expected_program_dict_raw_inactive,
+    )
+    assert found_rows == expected_balance_rows
+
+
+@pytest.mark.parametrize(
+    "balance_dict,chart_dict,exc",
+    [
+        ({}, {}, KeyError),
+        (
+            mock_balance_invalid1,
+            expected_program_dict_raw_inactive,
+            ValueError,
+        ),
+        (
+            mock_balance_invalid2,
+            expected_program_dict_raw_inactive,
+            KeyError,
+        ),
+    ],
+)
+def test_process_balance_invalid(balance_dict, chart_dict, exc):
+    with pytest.raises(exc):
+        mip_api.balances.process_balance(
+            balance_dict,
+            chart_dict,
+        )
+
+
+def test_format_csv(mocker):
+    mocker.patch(
+        "mip_api.balances.process_balance",
+        autospec=True,
+        return_value=expected_balance_rows,
+    )
+
+    bal = coa = {}  # ignored
+    found_csv = mip_api.balances.format_csv(bal, coa)
+    assert found_csv == expected_balance_csv
+
+
 @pytest.mark.parametrize(
     "params,expected_bool",
     [
@@ -649,6 +852,7 @@ def _test_with_env(mocker, event, code, body=None, error=None, isjson=True):
     env_vars = {
         "MipOrg": org_name,
         "SsmPath": ssm_path,
+        "ApiTrialBalances": api_balances,
         "ApiChartOfAccounts": api_accounts,
         "ApiValidTags": api_tags,
         "CodesToOmit": omit_codes,
@@ -676,18 +880,25 @@ def _test_with_env(mocker, event, code, body=None, error=None, isjson=True):
         return_value=expected_program_dict_raw_inactive,
     )
 
+    # mock out balances
+    mocker.patch(
+        "mip_api.balances.get_balances",
+        autospec=True,
+        return_value=mock_balance_success,
+    )
+
     # test event
     ret = mip_api.lambda_handler(event, None)
     if isjson:
-        body = json.loads(ret["body"])
+        _body = json.loads(ret["body"])
     else:
-        body = ret["body"]
+        _body = ret["body"]
 
     if error is not None:
-        assert body["error"] == error
+        assert _body["error"] == error
 
     elif body is not None:
-        assert body == body
+        assert _body == body
 
     assert ret["statusCode"] == code
 
@@ -708,6 +919,12 @@ def test_lambda_handler_accounts(accounts_event, mocker):
     """Test chart-of-accounts event"""
 
     _test_with_env(mocker, accounts_event, 200, body=expected_program_dict_processed)
+
+
+def test_lambda_handler_balances(balances_event, mocker):
+    """Test chart-of-balances event"""
+
+    _test_with_env(mocker, balances_event, 200, body=expected_balance_csv, isjson=False)
 
 
 def test_lambda_handler_tags(tags_event, mocker):

@@ -1,18 +1,19 @@
 # lambda-mips-api
 
-An AWS Lambda microservice presenting MIPS chart of accounts data
+An AWS Lambda microservice providing limited read-only access to MIP Cloud.
 
 ## Architecture
 
-This microservice is designed to retrieve a chart of accounts from a third-party
-API and present the data in a useful format.
+This microservice is designed to retrieve data using the MIP Cloud API and
+present the data in a useful format.
 
 Formats available:
 
-| API Route | Description                                                              |
-| --------- | ------------------------------------------------------------------------ |
-| /accounts | A dictionary mapping the chart of accounts to their friendly names.      |
-| /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`. |
+| API Route | Description                                                                 |
+| --------- | --------------------------------------------------------------------------- |
+| /accounts | A dictionary mapping the chart of program accounts to their friendly names. |
+| /balances | A CSV listing GL account balances, appropriate for FloQast consumption.     |
+| /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`.    |
 
 Since we reach out to a third-party API across the internet, responses are
 cached to minimize interaction with the API and mitigate potential environmental
@@ -28,7 +29,7 @@ data to be stored in Cloudfront for a default of one day.
 In the event of a cache hit, Cloudfront will return the cached value without
 triggering an API gateway event.
 
-### Default Behavior
+### Chart of Accounts Behavior
 
 By default, the lambda will process the chart of accounts received to remove
 inactive codes, deduplicate the significant portion of active codes, and add a
@@ -40,6 +41,15 @@ Specific account codes from the chart of accounts can be ignored globally with
 the `CodesToOmit` template parameter. Remaining codes will be returned in
 numeric order as either a list of strings or a json dictionary depending on the
 API route.
+
+### Current Balances
+
+When retrieving a CSV of current balances, the full chart of accounts will be
+processed according to query-string parameters, and then collated with MIP trial
+balance data.
+
+During the first week of the month, the balance will be calculated for the
+previous month; otherwise a month-to-date balance will be calculated.
 
 ### Required Secure Parameters
 
@@ -73,16 +83,23 @@ environment:
 
 ### Query String Parameters
 
-Several query-string parameters are available for either endpoint to configure
-response output.
+Several query-string parameters are shared by the endpoints to configure the
+list of accounts in the response output. All query string parameters except for
+`year_to_date` effect the `/accounts` and `/tags` endpoints. The only parameters
+that effect the `/balances` endpoint are `show_inactive_codes` and
+`target_date`.
 
-| Query String Parameter | Allowed Values                        |
-| ---------------------- | ------------------------------------- |
-| show_other_code        | "on" or "yes" or "true"               |
-| hide_no_program_code   | "on" or "yes" or "true"               |
-| show_inactive_codes    | "on" or "yes" or "true"               |
-| priority_codes         | Comma-separated list of numeric codes |
-| limit                  | Integer                               |
+| Query String Parameter | Allowed Values                        | Default       | Supported Endpoints               |
+| ---------------------- | ------------------------------------- | ------------- | --------------------------------- |
+| show_other_code        | Boolean value                         | False         | `/accounts`, `/tags`              |
+| hide_no_program_code   | Boolean value                         | False         | `/accounts`, `/tags`              |
+| show_inactive_codes    | Boolean value                         | False         | `/accounts`, `/balances`, `/tags` |
+| priority_codes         | Comma-separated list of numeric codes | Empty list    | `/accounts`, `/tags`              |
+| limit                  | Integer                               | 0 (unlimited) | `/accounts`, `/tags`              |
+| target_date            | ISO 8601 string                       | Today         | `/balances`                       |
+
+Boolean values: any value other than "no", "off", or "false" will be interpreted
+as true, including the empty string.
 
 A `show_other_code` parameter is available to optionally include an "Other"
 entry in the output with a value from the `OtherCode` parameter. Defining any
@@ -104,6 +121,9 @@ prioritized when included. Example value: `123456,654321`.
 
 A `limit` parameter is available to restrict the number of items returned. This
 value must be a positive integer, a value of zero disables the parameter.
+
+A `target_date` parameter is available to calculate a balance period from a day
+other than today.
 
 ### Triggering
 
