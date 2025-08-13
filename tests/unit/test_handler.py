@@ -12,19 +12,40 @@ from botocore.stub import Stubber
 
 # fixtures that don't need a setup function
 
-# environment variables
 api_accounts = "/test/accounts"
 api_tags = "/test/tags"
+api_invalid = "/test/invalid"
+
+
+# mock query-string parameters
+mock_foo_qsp_param = {"foo": "bar"}
+mock_limit_qsp_param = {"limit": "2"}
+mock_other_qsp_param = {"show_other_code": "true"}
+mock_inactive_qsp_param = {"show_inactive_codes": "true"}
+mock_no_program_qsp_param = {"hide_no_program_code": "true"}
+
+mock_priority_codes_str = "54321,234567"
+mock_priority_codes_list = ["54321", "234567"]
+mock_priority_qsp_param = {"priority_codes": mock_priority_codes_str}
+
+expected_default_params = {
+    "hide_inactive": True,
+    "limit": 0,
+    "priority_codes": [],
+    "show_no_program": True,
+    "show_other": False,
+}
+
 org_name = "testOrg"
 ssm_path = "secret/path"
+
 omit_codes = "999900,999800"
 other_code = "000001"
 no_program_code = "000000"
+
 s3_bucket = "test-bucket"
 s3_path = "test-path"
 
-# neither api_accounts nor api_tags
-api_invalid = "/test/invalid"
 
 expected_omit_codes = [
     "999900",
@@ -74,7 +95,12 @@ expected_segid = 1
 
 mock_accounts = {
     "COA_SEGID": [
-        {"COA_SEGID": 0, "COA_CODE": "1", "COA_STATUS": "A", "COA_TITLE": "Direct"},
+        {
+            "COA_SEGID": 0,
+            "COA_CODE": "1",
+            "COA_STATUS": "A",
+            "COA_TITLE": "Direct",
+        },
         {
             "COA_SEGID": 1,
             "COA_CODE": "12345600",
@@ -91,7 +117,7 @@ mock_accounts = {
             "COA_SEGID": 1,
             "COA_CODE": "23456700",
             "COA_STATUS": "A",
-            "COA_TITLE": "Other Program",
+            "COA_TITLE": "Another Program",
         },
         {
             "COA_SEGID": 1,
@@ -113,6 +139,12 @@ mock_accounts = {
         },
         {
             "COA_SEGID": 1,
+            "COA_CODE": "76543200",
+            "COA_STATUS": "I",
+            "COA_TITLE": "Ignored",
+        },
+        {
+            "COA_SEGID": 1,
             "COA_CODE": "99030000",
             "COA_STATUS": "A",
             "COA_TITLE": "Platform Infrastructure",
@@ -123,97 +155,101 @@ mock_accounts = {
             "COA_STATUS": "A",
             "COA_TITLE": "Unfunded",
         },
-        {
-            "COA_SEGID": 1,
-            "COA_CODE": "76543200",
-            "COA_STATUS": "I",
-            "COA_TITLE": "Ignored",
-        },
     ]
 }
 
 
 # expected internal dictionary
-expected_mip_dict_raw = {
+expected_program_dict_raw = {
     "12345600": "Program Part A",
     "12345601": "Program Part B",
-    "23456700": "Other Program",
+    "23456700": "Another Program",
     "34567800": "(Special: @Symbols!) Program",
     "45678900": "Long Program " + ("X" * 300),
-    "54321": "Inactive",
+    "54321": "Inactive",  # include because COA_STATUS == A
     "99030000": "Platform Infrastructure",
     "99990000": "Unfunded",
 }
 
+expected_program_dict_raw_inactive = {
+    "12345600": "Program Part A",
+    "12345601": "Program Part B",
+    "23456700": "Another Program",
+    "34567800": "(Special: @Symbols!) Program",
+    "45678900": "Long Program " + ("X" * 300),
+    "54321": "Inactive",
+    "76543200": "Ignored",
+    "99030000": "Platform Infrastructure",
+    "99990000": "Unfunded",
+}
 
-mock_s3_get_response = {"Body": io.BytesIO(json.dumps(expected_mip_dict_raw).encode())}
+mock_s3_get_response = {
+    "Body": io.BytesIO(json.dumps(expected_program_dict_raw).encode())
+}
 
 mock_s3_put_response = {}
 
 
-expected_mip_dict_raw_limit = {
-    "12345600": "Program Part A",
-    "12345601": "Program Part B",
-}
-
-expected_mip_dict_processed = {
+expected_program_dict_processed = {
     "000000": "No Program",
     "123456": "Program Part A",
-    "234567": "Other Program",
+    "234567": "Another Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
     "990300": "Platform Infrastructure",
 }
 
-expected_mip_dict_processed_other = {
+expected_program_dict_processed_other = {
     "000000": "No Program",
     "000001": "Other",
     "123456": "Program Part A",
-    "234567": "Other Program",
+    "234567": "Another Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
     "990300": "Platform Infrastructure",
 }
 
-expected_mip_dict_processed_no = {
+expected_program_dict_processed_no = {
     "123456": "Program Part A",
-    "234567": "Other Program",
+    "234567": "Another Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
     "990300": "Platform Infrastructure",
 }
 
-expected_mip_dict_processed_other_no = {
+expected_program_dict_processed_other_no = {
     "000001": "Other",
     "123456": "Program Part A",
-    "234567": "Other Program",
+    "234567": "Another Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
     "990300": "Platform Infrastructure",
 }
 
-expected_mip_dict_processed_inactive = {
+expected_program_dict_processed_inactive = {
     "000000": "No Program",
     "123456": "Program Part A",
-    "234567": "Other Program",
+    "234567": "Another Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
     "54321": "Inactive",
+    "765432": "Ignored",
     "990300": "Platform Infrastructure",
 }
 
-expected_mip_dict_processed_limit = {
+expected_program_dict_processed_limit = {
     "000000": "No Program",
     "123456": "Program Part A",
 }
 
-expected_mip_dict_processed_priority_codes = {
+expected_program_dict_processed_priority_codes = {
     "000000": "No Program",
     "54321": "Inactive",
+    "234567": "Another Program",
     "123456": "Program Part A",
-    "234567": "Other Program",
     "345678": "Special: @Symbols Program",
     "456789": "Long Program " + ("X" * 300),
+    "765432": "Ignored",
     "990300": "Platform Infrastructure",
 }
 
@@ -221,7 +257,7 @@ expected_mip_dict_processed_priority_codes = {
 expected_tag_list = [
     "No Program / 000000",
     "Program Part A / 123456",
-    "Other Program / 234567",
+    "Another Program / 234567",
     "Special: @Symbols Program / 345678",
     "Long Program " + ("X" * 232) + " / 456789",  # truncate at 256 chars
     "Platform Infrastructure / 990300",
@@ -233,17 +269,12 @@ expected_tag_list_limit = [
     "Program Part A / 123456",
 ]
 
-# mock query-string parameters
-mock_foo_param = {"foo": "bar"}
-mock_limit_param = {"limit": "2"}
-mock_other_param = {"show_other_code": "true"}
-mock_priority_param = {"priority_codes": "54321"}
-mock_inactive_param = {"show_inactive_codes": "true"}
-mock_no_program_param = {"hide_no_program_code": "true"}
 
-
-def apigw_event(path, qsp={"foo": "bar"}):
+def apigw_event(path, qsp=None):
     """Generates API GW Event"""
+
+    if qsp is None:
+        qsp = {"foo": "bar"}
 
     return {
         "body": '{ "test": "body"}',
@@ -315,7 +346,7 @@ def tags_event():
 
 @pytest.fixture()
 def tags_limit_event():
-    return apigw_event(api_tags, qsp=mock_limit_param)
+    return apigw_event(api_tags, qsp=mock_limit_qsp_param)
 
 
 def test_secrets(mocker):
@@ -385,13 +416,11 @@ def test_upstream(mocker, requests_mock):
     )
     logout_mock = requests_mock.post(mip_api.upstream.mip_url_logout)
 
-    # get chart of accounts from mip
-    mip_dict = mip_api.upstream.program_chart(org_name, mock_secrets)
+    # get chart of accounts
+    program_dict = mip_api.upstream.get_chart(org_name, mock_secrets, "Program", True)
+    assert program_dict == expected_program_dict_raw
 
-    # assert expected data
-    assert mip_dict == expected_mip_dict_raw
-
-    # assert all mock urls were called
+    # assert mock urls were called
     assert login_mock.call_count == 1
     assert segment_mock.call_count == 1
     assert account_mock.call_count == 1
@@ -403,8 +432,8 @@ def test_upstream(mocker, requests_mock):
     requests_mock.get(mip_api.upstream.mip_url_coa_segments, exc=Exception)
 
     # assert logout is called when an exception is raised
-    mip_api.upstream.program_chart(org_name, mock_secrets)
-    assert logout_mock.call_count == 2
+    mip_api.upstream.get_chart(org_name, mock_secrets, "Program", False)
+    assert logout_mock.call_count == 3
 
 
 def test_cache_read(mocker):
@@ -415,8 +444,8 @@ def test_cache_read(mocker):
     mip_api.s3.s3_client = s3
     with Stubber(s3) as _stub:
         _stub.add_response("get_object", mock_s3_get_response)
-        found = mip_api.s3.cache_read(s3_bucket, s3_path)
-        assert found == expected_mip_dict_raw
+        found = mip_api.s3._read(s3_bucket, s3_path)
+        assert found == expected_program_dict_raw
 
 
 def test_cache_write(mocker):
@@ -429,54 +458,47 @@ def test_cache_write(mocker):
         _stub.add_response("put_object", mock_s3_put_response)
 
         # assert no exception is raised
-        mip_api.s3.cache_write(expected_mip_dict_raw, s3_bucket, s3_path)
+        mip_api.s3._write(expected_program_dict_raw, s3_bucket, s3_path)
 
 
 @pytest.mark.parametrize(
     "upstream_response,cache_response",
     [
-        (expected_mip_dict_raw, None),
-        (None, expected_mip_dict_raw),
-        (expected_mip_dict_raw, expected_mip_dict_raw),
+        (expected_program_dict_raw, None),
+        (None, expected_program_dict_raw),
+        (expected_program_dict_raw, expected_program_dict_raw),
     ],
 )
-def test_chart(mocker, upstream_response, cache_response):
-    """Test chart_cache() with no upstream response"""
+def test_cache(mocker, upstream_response, cache_response):
     mocker.patch(
-        "mip_api.upstream.program_chart",
-        autospec=True,
-        return_value=upstream_response,
-    )
-    mocker.patch(
-        "mip_api.s3.cache_read",
+        "mip_api.s3._read",
         autospec=True,
         return_value=cache_response,
     )
-    write_mock = mocker.patch(
-        "mip_api.s3.cache_write",
+    mocker.patch(
+        "mip_api.s3._write",
         autospec=True,
     )
 
-    found_dict = mip_api.chart.get_chart(org_name, mock_secrets, s3_bucket, s3_path)
-    assert found_dict == expected_mip_dict_raw
-
-
-def test_chart_invalid(mocker):
-    """Test chart_cache() with no valid response found"""
-    mocker.patch(
-        "mip_api.upstream.program_chart",
-        autospec=True,
-        return_value=None,
+    found_dict = mip_api.s3.cache(
+        expected_program_dict_raw,
+        s3_bucket,
+        s3_path,
     )
+    assert found_dict == expected_program_dict_raw
+
+
+def test_cache_invalid(mocker):
+    """Test cache() with no valid response found"""
     mocker.patch(
-        "mip_api.s3.cache_read",
+        "mip_api.s3._read",
         autospec=True,
         side_effect=Exception,
     )
 
     # assert that we raise a ValueError
     with pytest.raises(ValueError):
-        found_dict = mip_api.chart.get_chart(org_name, mock_secrets, s3_bucket, s3_path)
+        mip_api.s3.cache({}, s3_bucket, s3_path)
 
 
 @pytest.mark.parametrize(
@@ -495,27 +517,47 @@ def test_parse_codes(code_str, code_list):
 
 
 @pytest.mark.parametrize(
-    "params,expected_dict",
+    "raw_dict,params,expected_dict",
     [
-        ({}, expected_mip_dict_processed),
-        (mock_foo_param, expected_mip_dict_processed),
-        (mock_other_param, expected_mip_dict_processed_other),
-        (mock_inactive_param, expected_mip_dict_processed_inactive),
-        (mock_no_program_param, expected_mip_dict_processed_no),
-        (mock_priority_param, expected_mip_dict_processed),
+        (expected_program_dict_raw, {}, expected_program_dict_processed),
         (
-            mock_priority_param | mock_inactive_param,
-            expected_mip_dict_processed_priority_codes,
+            expected_program_dict_raw,
+            {"show_other": True},
+            expected_program_dict_processed_other,
         ),
         (
-            mock_other_param | mock_no_program_param,
-            expected_mip_dict_processed_other_no,
+            expected_program_dict_raw_inactive,
+            {"hide_inactive": False},
+            expected_program_dict_processed_inactive,
+        ),
+        (
+            expected_program_dict_raw,
+            {"show_no_program": False},
+            expected_program_dict_processed_no,
+        ),
+        (
+            expected_program_dict_raw_inactive,
+            {
+                "priority_codes": mock_priority_codes_list,
+                "hide_inactive": False,
+            },
+            expected_program_dict_processed_priority_codes,
+        ),
+        (
+            expected_program_dict_raw,
+            {"show_other": True, "show_no_program": False},
+            expected_program_dict_processed_other_no,
         ),
     ],
 )
-def test_process_chart(params, expected_dict):
+def test_process_chart(raw_dict, params, expected_dict):
+    test_params = expected_default_params | params
     processed_chart = mip_api.chart.process_chart(
-        params, expected_mip_dict_raw, expected_omit_codes, other_code, no_program_code
+        raw_dict,
+        expected_omit_codes,
+        other_code,
+        no_program_code,
+        test_params,
     )
     assert json.dumps(processed_chart) == json.dumps(expected_dict)
 
@@ -548,7 +590,7 @@ def test_param_bool(params, expected_bool):
     ],
 )
 def test_param_limit_int(params, expected_int):
-    found_limit_int = mip_api.util.param_limit_int(params)
+    found_limit_int = mip_api.util._param_limit_int(params)
     assert found_limit_int == expected_int
 
 
@@ -561,40 +603,34 @@ def test_param_limit_int(params, expected_int):
 )
 def test_param_limit_int_err(params):
     with pytest.raises(ValueError):
-        found_limit_int = mip_api.util.param_limit_int(params)
+        mip_api.util._param_limit_int(params)
 
 
 @pytest.mark.parametrize(
-    "params,input_chart,expected_chart",
+    "input_chart,limit,expected_chart",
     [
-        ({}, expected_mip_dict_processed, expected_mip_dict_processed),
-        (mock_foo_param, expected_mip_dict_raw, expected_mip_dict_raw),
-        (mock_limit_param, expected_mip_dict_raw, expected_mip_dict_raw_limit),
-        (
-            mock_limit_param | mock_foo_param,
-            expected_mip_dict_processed,
-            expected_mip_dict_processed_limit,
-        ),
+        (expected_program_dict_processed, 0, expected_program_dict_processed),
+        (expected_program_dict_processed, 2, expected_program_dict_processed_limit),
     ],
 )
-def test_limit_chart(params, input_chart, expected_chart):
-    processed_chart = mip_api.chart.limit_chart(params, input_chart)
+def test_limit_chart(input_chart, limit, expected_chart):
+    processed_chart = mip_api.chart.limit_chart(input_chart, limit)
     assert processed_chart == expected_chart
 
 
 @pytest.mark.parametrize(
-    "params,expected_list",
+    "test_dict,expected_list",
     [
-        ({}, expected_tag_list),
-        (mock_foo_param, expected_tag_list),
-        (mock_limit_param, expected_tag_list_limit),
+        ({}, []),
+        (expected_program_dict_processed, expected_tag_list),
+        (expected_program_dict_processed_limit, expected_tag_list_limit),
     ],
 )
-def test_tags(params, expected_list):
+def test_tags(test_dict, expected_list):
     """Testing building tag list from collected chart of accounts"""
 
     # assert expected tag list
-    tag_list = mip_api.chart.list_tags(params, expected_mip_dict_processed)
+    tag_list = mip_api.chart.list_tags(test_dict)
     assert tag_list == expected_list
 
 
@@ -606,12 +642,12 @@ def test_lambda_handler_no_env(invalid_event):
     assert ret["statusCode"] == 500
 
 
-def _test_with_env(mocker, event, code, body=None, error=None):
+def _test_with_env(mocker, event, code, body=None, error=None, isjson=True):
     """Keep lambda_handler tests DRY"""
 
     # mock environment variables
     env_vars = {
-        "MipsOrg": org_name,
+        "MipOrg": org_name,
         "SsmPath": ssm_path,
         "ApiChartOfAccounts": api_accounts,
         "ApiValidTags": api_tags,
@@ -619,27 +655,39 @@ def _test_with_env(mocker, event, code, body=None, error=None):
         "NoProgramCode": no_program_code,
         "OtherCode": other_code,
         "CacheBucket": s3_bucket,
-        "CacheBucketPath": s3_path,
+        "CacheBucketPrefix": s3_path,
     }
     mocker.patch.dict(os.environ, env_vars)
 
     # mock out get_secrets() with mock secrets
     mocker.patch("mip_api.ssm.get_secrets", autospec=True, return_value=mock_secrets)
 
-    # mock out chart_cache() with mock chart
+    # mock out program chart
     mocker.patch(
-        "mip_api.chart.get_chart", autospec=True, return_value=expected_mip_dict_raw
+        "mip_api.chart.get_program_chart",
+        autospec=True,
+        return_value=expected_program_dict_raw,
+    )
+
+    # mock out gl chart
+    mocker.patch(
+        "mip_api.chart.get_gl_chart",
+        autospec=True,
+        return_value=expected_program_dict_raw_inactive,
     )
 
     # test event
     ret = mip_api.lambda_handler(event, None)
-    json_body = json.loads(ret["body"])
+    if isjson:
+        body = json.loads(ret["body"])
+    else:
+        body = ret["body"]
 
     if error is not None:
-        assert json_body["error"] == error
+        assert body["error"] == error
 
     elif body is not None:
-        assert json_body == body
+        assert body == body
 
     assert ret["statusCode"] == code
 
@@ -659,7 +707,7 @@ def test_lambda_handler_empty_event(mocker):
 def test_lambda_handler_accounts(accounts_event, mocker):
     """Test chart-of-accounts event"""
 
-    _test_with_env(mocker, accounts_event, 200, body=expected_mip_dict_processed)
+    _test_with_env(mocker, accounts_event, 200, body=expected_program_dict_processed)
 
 
 def test_lambda_handler_tags(tags_event, mocker):

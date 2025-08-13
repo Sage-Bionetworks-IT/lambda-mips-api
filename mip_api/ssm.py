@@ -12,7 +12,19 @@ ssm_client = None
 
 
 def get_secrets(ssm_path):
-    """Collect secure parameters from SSM"""
+    """
+    Collect secure parameters from SSM
+
+    Parameters
+    ----------
+    ssm_path : str
+        The path to recursively get SSM secure parameters from.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping SSM parameter names to their values.
+    """
 
     # create boto client
     global ssm_client

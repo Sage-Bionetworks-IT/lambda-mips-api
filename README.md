@@ -65,7 +65,7 @@ environment:
 
 | Template Parameter | Environment Variable | Description                                        |
 | ------------------ | -------------------- | -------------------------------------------------- |
-| MipsOrganization   | MipsOrg              | Log in to this organization in the finance system. |
+| MipOrganization    | MipOrg               | Log in to this organization in the finance system. |
 | SsmParamPrefix     | SsmPath              | Path prefix for required secure parameters.        |
 | CodesToOmit        | CodesToOmit          | List of numeric codes to remove from output.       |
 | NoProgramCode      | NoProgramCode        | Numeric code to use for "No Program" entry.        |
