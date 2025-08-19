@@ -105,7 +105,7 @@ def lambda_handler(event, context):
 
                 # combine them into CSV output
                 balances_csv = balances.format_csv(raw_bal, gl_chart)
-                return util.build_return_text(200, balances_csv)
+                return util.build_return_csv(200, balances_csv)
 
             # common processing for '/accounts' and '/tags'
 

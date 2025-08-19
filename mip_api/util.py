@@ -15,11 +15,11 @@ def build_return_json(code, body):
     }
 
 
-def build_return_text(code, body):
+def build_return_csv(code, body):
     return {
         "statusCode": code,
         "body": body,
-        "headers": {"Content-Type": "test/csv"},
+        "headers": {"Content-Type": "text/csv"},
     }
 
 
