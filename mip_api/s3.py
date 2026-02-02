@@ -3,7 +3,6 @@ import logging
 
 import boto3
 
-
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
