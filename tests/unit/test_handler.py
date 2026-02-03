@@ -9,7 +9,6 @@ import boto3
 import pytest
 from botocore.stub import Stubber
 
-
 # fixtures that don't need a setup function
 
 api_accounts = "/test/accounts"
