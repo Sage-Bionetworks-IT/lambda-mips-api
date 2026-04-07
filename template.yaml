@@ -55,6 +55,17 @@ Conditions:
   HasDnsNames: !Not [ !Equals [ !Join [ "", !Ref DnsNames ], "" ] ]
 
 Resources:
+  # Explicit API definition to enable IAM auth on /balances
+  MipsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        # Default is no auth (public); override per-endpoint below
+        DefaultAuthorizer: NONE
+      EndpointConfiguration:
+        Type: REGIONAL
+
   CacheBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -114,16 +125,21 @@ Resources:
           Properties:
             Path: '/accounts'
             Method: get
+            RestApiId: !Ref MipsApi
         TrialBalances:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             Path: '/balances'
             Method: get
+            RestApiId: !Ref MipsApi
+            Auth:
+              Authorizer: AWS_IAM
         ValidTags:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             Path: '/tags'
             Method: get
+            RestApiId: !Ref MipsApi
 
   FunctionRole:   # execute lambda function with this role
     Type: AWS::IAM::Role
@@ -158,9 +174,18 @@ Resources:
           CachePolicyId: !Ref CloudFrontCachePolicy
           TargetOriginId: LambdaOrigin
           ViewerProtocolPolicy: 'redirect-to-https'
+        CacheBehaviors:
+          # Block /balances at CloudFront — must use API Gateway directly with IAM auth
+          - PathPattern: '/balances*'
+            TargetOriginId: LambdaOrigin
+            ViewerProtocolPolicy: 'redirect-to-https'
+            CachePolicyId: !Ref CloudFrontCachePolicy
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt BlockBalancesFunction.FunctionMetadata.FunctionARN
         Origins:
           - Id: LambdaOrigin
-            DomainName: !Sub "${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com"
+            DomainName: !Sub "${MipsApi}.execute-api.${AWS::Region}.amazonaws.com"
             OriginPath: /Prod
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
@@ -173,11 +198,30 @@ Resources:
           MinimumProtocolVersion: !If [ HasAcmCertificateArn, "TLSv1.2_2021", !Ref "AWS::NoValue" ]
           SslSupportMethod: !If [ HasAcmCertificateArn, "sni-only", !Ref "AWS::NoValue" ]
 
+  # CloudFront Function to return 403 for /balances requests via CloudFront
+  BlockBalancesFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "block-balances-${MipsApi}"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: "Return 403 for /balances — must use API Gateway directly with IAM auth"
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          return {
+            statusCode: 403,
+            statusDescription: 'Forbidden',
+            headers: { 'content-type': { value: 'application/json' } },
+            body: '{"error": "The /balances endpoint requires IAM authentication. Use the API Gateway URL directly."}'
+          };
+        }
+
   CloudFrontCachePolicy:
     Type: AWS::CloudFront::CachePolicy
     Properties:
       CachePolicyConfig:
-        Name: !Sub "LambdaCache-${ServerlessRestApi}"
+        Name: !Sub "LambdaCache-${MipsApi}"
         MinTTL: 0
         MaxTTL: !Ref CacheTTL
         DefaultTTL: !Ref CacheTTL
@@ -243,21 +287,25 @@ Resources:
       AliasName: !Sub 'alias/${SsmAliasPrefix}-ssm-key'
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   ApiRouteChartOfAccounts:
     Description: "CloudFront URL for the full chart of accounts"
     Value: !Sub "https://${CloudFrontCache.DomainName}/accounts"
   ApiRouteTrialBalances:
-    Description: "CloudFront URL for trial balances"
-    Value: !Sub "https://${CloudFrontCache.DomainName}/balances"
+    Description: "API Gateway URL for trial balances (IAM auth required)"
+    Value: !Sub "https://${MipsApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/balances"
   ApiRouteValidTags:
     Description: "CloudFront URL for listing valid CostCenter tag values"
     Value: !Sub "https://${CloudFrontCache.DomainName}/tags"
   OriginUrl:
-    Description: "API Gateway origin URL with stage (for debugging)"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Description: "API Gateway base URL with stage, used by downstream lambdas to construct endpoint URLs"
+    Value: !Sub "https://${MipsApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-OriginUrl'
+  BalancesExecuteArn:
+    Description: "execute-api ARN for the /balances endpoint (IAM auth), used by downstream lambda IAM policies"
+    Value: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MipsApi}/Prod/GET/balances"
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-BalancesExecuteArn'
   FunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt Function.Arn
