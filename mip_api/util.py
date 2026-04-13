@@ -90,8 +90,11 @@ def _param_show_no_program_bool(params):
 
 
 def _param_date_str(params):
-    # Default is to show "no program" code
-    return _param_str(params, "target_date")
+    # Default is None (use current date)
+    _date = _param_str(params, "target_date")
+    if _date:
+        return _date
+    return None
 
 
 def _param_limit_int(params):
