@@ -34,7 +34,7 @@ expected_default_params = {
     "priority_codes": [],
     "show_no_program": True,
     "show_other": False,
-    "date": "",
+    "date": None,
 }
 
 org_name = "testOrg"
@@ -863,6 +863,161 @@ def test_param_limit_int(params, expected_int):
 def test_param_limit_int_err(params):
     with pytest.raises(ValueError):
         mip_api.util._param_limit_int(params)
+
+
+@pytest.mark.parametrize(
+    "params,param,expected_str",
+    [
+        ({}, "foo", ""),
+        (None, "foo", ""),
+        ({"foo": "bar"}, "foo", "bar"),
+        ({"foo": "bar"}, "baz", ""),
+    ],
+)
+def test_param_str(params, param, expected_str):
+    found_str = mip_api.util._param_str(params, param)
+    assert found_str == expected_str
+
+
+@pytest.mark.parametrize(
+    "params,param,expected_int",
+    [
+        ({}, "num", 0),
+        (None, "num", 0),
+        ({"num": "42"}, "num", 42),
+        ({"num": "0"}, "num", 0),
+        ({"other": "5"}, "num", 0),
+    ],
+)
+def test_param_int(params, param, expected_int):
+    found_int = mip_api.util._param_int(params, param)
+    assert found_int == expected_int
+
+
+@pytest.mark.parametrize(
+    "params,param",
+    [
+        ({"num": ""}, "num"),
+        ({"num": "abc"}, "num"),
+    ],
+)
+def test_param_int_err(params, param):
+    with pytest.raises(ValueError):
+        mip_api.util._param_int(params, param)
+
+
+def test_param_limit_int_negative():
+    with pytest.raises(ValueError):
+        mip_api.util._param_limit_int({"limit": "-1"})
+
+
+@pytest.mark.parametrize(
+    "params,expected_date",
+    [
+        ({}, None),
+        (None, None),
+        ({"target_date": "2025-05-15"}, "2025-05-15"),
+        ({"other": "value"}, None),
+    ],
+)
+def test_param_date_str(params, expected_date):
+    found_date = mip_api.util._param_date_str(params)
+    assert found_date == expected_date
+
+
+@pytest.mark.parametrize(
+    "params,expected_bool",
+    [
+        ({}, True),
+        (None, True),
+        ({"show_inactive_codes": "true"}, False),
+        ({"show_inactive_codes": "false"}, True),
+    ],
+)
+def test_param_hide_inactive_bool(params, expected_bool):
+    found_bool = mip_api.util._param_hide_inactive_bool(params)
+    assert found_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+    "params,expected_bool",
+    [
+        ({}, False),
+        (None, False),
+        ({"show_other_code": "true"}, True),
+        ({"show_other_code": "false"}, False),
+    ],
+)
+def test_param_show_other_bool(params, expected_bool):
+    found_bool = mip_api.util._param_show_other_bool(params)
+    assert found_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+    "params,expected_bool",
+    [
+        ({}, True),
+        (None, True),
+        ({"hide_no_program_code": "true"}, False),
+        ({"hide_no_program_code": "false"}, True),
+    ],
+)
+def test_param_show_no_program_bool(params, expected_bool):
+    found_bool = mip_api.util._param_show_no_program_bool(params)
+    assert found_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+    "params,expected_list",
+    [
+        ({}, None),
+        (None, None),
+        ({"priority_codes": "1,2,3"}, ["1", "2", "3"]),
+        ({"priority_codes": "single"}, ["single"]),
+        ({"other": "value"}, None),
+    ],
+)
+def test_param_priority_list(params, expected_list):
+    found_list = mip_api.util._param_priority_list(params)
+    assert found_list == expected_list
+
+
+def test_params_dict_no_qsp():
+    """Test params_dict with no queryStringParameters in event"""
+    event = {"path": "/test"}
+    params = mip_api.util.params_dict(event)
+    assert params == {
+        "hide_inactive": True,
+        "limit": 0,
+        "priority_codes": None,
+        "show_no_program": True,
+        "show_other": False,
+        "date": None,
+    }
+
+
+def test_params_dict_with_qsp():
+    """Test params_dict with queryStringParameters in event"""
+    event = {
+        "path": "/test",
+        "queryStringParameters": {
+            "show_inactive_codes": "true",
+            "limit": "10",
+            "target_date": "2025-05-15",
+            "show_other_code": "yes",
+            "hide_no_program_code": "true",
+            "priority_codes": "1,2",
+        },
+    }
+    params = mip_api.util.params_dict(event)
+    assert params == {
+        "hide_inactive": False,
+        "limit": 10,
+        "priority_codes": ["1", "2"],
+        "show_no_program": False,
+        "show_other": True,
+        "date": "2025-05-15",
+    }
 
 
 @pytest.mark.parametrize(
