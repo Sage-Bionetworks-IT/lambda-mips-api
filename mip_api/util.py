@@ -90,8 +90,11 @@ def _param_show_no_program_bool(params):
 
 
 def _param_date_str(params):
-    # Default is to show "no program" code
-    return _param_str(params, "target_date")
+    # Default is None (use current date)
+    _date = _param_str(params, "target_date")
+    if _date:
+        return _date
+    return None
 
 
 def _param_limit_int(params):
@@ -144,11 +147,9 @@ def target_period(when=None):
     Calculate the target activity period for balance data based on a
     target day. If no day is given then the current day is used.
 
-    If the target day is during the first week of the month, the target
-    activity period will be the previous month (e.g. on April 3rd the
-    period will be from March 1 through March 31). Otherwise, the period
-    will be month-to-date for the target day (e.g. on April 15th the
-    period will be from April 1st to April 15th).
+    For the current month, returns month-to-date (1st to target day).
+    For previous months, returns the full month (1st to last day).
+    Exception: on the 1st of the month, returns the previous month instead.
 
     This supports two use cases: getting the balance activity for the current
     month-to-date, and also re-processing past months because those periods
@@ -172,19 +173,26 @@ def target_period(when=None):
         target_day = date.fromisoformat(when)
     LOG.info(f"Processing period for {target_day}")
 
-    if target_day.day <= 7:
-        # at the beginning of the month, look at previous month
-        _first = target_day.replace(day=1)  # first day of target month
-        end = _first - timedelta(days=1)  # last day of previous month
-        start = end.replace(day=1)  # first day of previous month
+    today = date.today()
+    is_current_month = target_day.month == today.month and target_day.year == today.year
 
-        end_str = end.isoformat()
-        start_str = start.isoformat()
-    else:
-        # otherwise look at month-to-date
+    if target_day.day == 1:
+        # On the 1st of the month, return the previous month
+        end = target_day - timedelta(days=1)
+        start = end.replace(day=1)
+    elif is_current_month:
+        # Current month: return month-to-date
         start = target_day.replace(day=1)
-        end_str = target_day.isoformat()
-        start_str = start.isoformat()
+        end = target_day
+    else:
+        # Previous month: return full month
+        following_month_same_day = target_day.replace(month=(target_day.month + 1))
+        following_month_first = following_month_same_day.replace(day=1)
+        end = following_month_first - timedelta(days=1)
+        start = end.replace(day=1)
+
+    start_str = start.isoformat()
+    end_str = end.isoformat()
 
     LOG.info(f"Start day is {start_str}")
     LOG.info(f"End day is {end_str}")

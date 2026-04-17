@@ -34,7 +34,7 @@ expected_default_params = {
     "priority_codes": [],
     "show_no_program": True,
     "show_other": False,
-    "date": "",
+    "date": None,
 }
 
 org_name = "testOrg"
@@ -48,12 +48,40 @@ s3_bucket = "test-bucket"
 s3_path = "test-path"
 
 mock_date_early = date(2025, 5, 5)
-expected_start_date_early = "2025-04-01"
-expected_end_date_early = "2025-04-30"
+expected_start_date_early = "2025-05-01"
+expected_end_date_early = "2025-05-05"
 
 mock_date_late = date(2025, 5, 25)
 expected_start_date_late = "2025-05-01"
 expected_end_date_late = "2025-05-25"
+
+mock_date_first = date(2025, 5, 1)
+expected_start_date_first = "2025-04-01"
+expected_end_date_first = "2025-04-30"
+
+mock_date_prev_month = date(2025, 4, 15)
+expected_start_date_prev = "2025-04-01"
+expected_end_date_prev = "2025-04-15"
+
+mock_date_first_prev = date(2025, 4, 1)
+expected_start_date_first_prev = "2025-03-01"
+expected_end_date_first_prev = "2025-03-31"
+
+# Test date for previous month scenario (when today is later in the year)
+mock_date_prev = date(2025, 3, 15)
+expected_start_date_prev_full = "2025-03-01"
+expected_end_date_prev_full = "2025-03-15"
+
+# Test date for previous month scenario with mocked date.today()
+mock_date_input = date(2025, 3, 15)  # March 15, 2025
+mock_date_today = date(2025, 4, 10)  # April 10, 2025 (after March)
+expected_period_prev_month = ("2025-03-01", "2025-03-31")
+
+# Note: The test setup mocks date.today() to the input date, which makes all dates
+# appear as the current month. To test the "previous month" scenario, we need to
+# mock date.today() to a date AFTER the input date. This is not easily done with
+# the current parametrized test setup, so we add a separate test for the previous
+# month scenario.
 
 mock_balance_start = 9001.01
 mock_balance_activity = 101.01
@@ -477,8 +505,7 @@ def test_secrets(mocker):
         _stub.add_response("get_parameters_by_path", mock_ssm_params)
 
         # assert secrets were collected
-        secrets = mip_api.ssm.get_secrets(ssm_path)
-        assert secrets == mock_secrets
+        assert mip_api.ssm.get_secrets(ssm_path) == mock_secrets
 
 
 def test_no_secrets(mocker):
@@ -495,7 +522,7 @@ def test_no_secrets(mocker):
 
         # assert Exception is raised
         with pytest.raises(Exception):
-            secrets = mip_api.ssm.get_secrets(ssm_path)
+            mip_api.ssm.get_secrets(ssm_path)
 
 
 def test_bad_secrets(mocker):
@@ -518,22 +545,53 @@ def test_bad_secrets(mocker):
     [
         (mock_date_early, (expected_start_date_early, expected_end_date_early)),
         (mock_date_late, (expected_start_date_late, expected_end_date_late)),
+        (mock_date_first, (expected_start_date_first, expected_end_date_first)),
+        (mock_date_prev_month, (expected_start_date_prev, expected_end_date_prev)),
+        (
+            mock_date_first_prev,
+            (expected_start_date_first_prev, expected_end_date_first_prev),
+        ),
     ],
 )
 def test_periods(mocker, mock_date, expected_period):
     """Test getting balance periods"""
+    # Create a mock date class that returns mock_date for both today() and fromisoformat()
+    mock_date_class = mocker.MagicMock(spec=date)
+    mock_date_class.today.return_value = mock_date
+    mock_date_class.fromisoformat.return_value = mock_date
+
+    # Mock the date class in mip_api.util
+    mocker.patch("mip_api.util.date", new=mock_date_class)
+
     # first, test passing in a date string
     mock_date_str = mock_date.isoformat()
-
     found_period = mip_api.util.target_period(mock_date_str)
     assert found_period == expected_period
 
-    # next, mock the value of date.today
-    date_mock = mocker.patch("mip_api.util.date")
-    date_mock.today.return_value = mock_date
-
+    # next, test without arguments (uses date.today)
     found_period = mip_api.util.target_period()
     assert found_period == expected_period
+
+
+def test_periods_previous_month(mocker):
+    """Test getting balance periods for a previous month (not current month)"""
+    # Create a mock date class
+    mock_date_class = mocker.MagicMock(spec=date)
+
+    # Mock today() to return a date AFTER the input date (so input is "previous month")
+    mock_date_class.today.return_value = mock_date_today
+    # Mock fromisoformat to return the input date
+    mock_date_class.fromisoformat.return_value = mock_date_input
+
+    # Mock the date class in mip_api.util
+    mocker.patch("mip_api.util.date", new=mock_date_class)
+
+    # Test passing in a date string for a previous month
+    mock_date_str = mock_date_input.isoformat()
+    found_period = mip_api.util.target_period(mock_date_str)
+
+    # When the input date is in a previous month (not current), should return full month
+    assert found_period == expected_period_prev_month
 
 
 def test_upstream(mocker, requests_mock):
@@ -620,14 +678,13 @@ def test_cache_write(mocker):
 
 
 @pytest.mark.parametrize(
-    "upstream_response,cache_response",
+    "cache_response",
     [
-        (expected_program_dict_raw, None),
-        (None, expected_program_dict_raw),
-        (expected_program_dict_raw, expected_program_dict_raw),
+        None,
+        expected_program_dict_raw,
     ],
 )
-def test_cache(mocker, upstream_response, cache_response):
+def test_cache(mocker, cache_response):
     mocker.patch(
         "mip_api.s3._read",
         autospec=True,
@@ -806,6 +863,161 @@ def test_param_limit_int(params, expected_int):
 def test_param_limit_int_err(params):
     with pytest.raises(ValueError):
         mip_api.util._param_limit_int(params)
+
+
+@pytest.mark.parametrize(
+    "params,param,expected_str",
+    [
+        ({}, "foo", ""),
+        (None, "foo", ""),
+        ({"foo": "bar"}, "foo", "bar"),
+        ({"foo": "bar"}, "baz", ""),
+    ],
+)
+def test_param_str(params, param, expected_str):
+    found_str = mip_api.util._param_str(params, param)
+    assert found_str == expected_str
+
+
+@pytest.mark.parametrize(
+    "params,param,expected_int",
+    [
+        ({}, "num", 0),
+        (None, "num", 0),
+        ({"num": "42"}, "num", 42),
+        ({"num": "0"}, "num", 0),
+        ({"other": "5"}, "num", 0),
+    ],
+)
+def test_param_int(params, param, expected_int):
+    found_int = mip_api.util._param_int(params, param)
+    assert found_int == expected_int
+
+
+@pytest.mark.parametrize(
+    "params,param",
+    [
+        ({"num": ""}, "num"),
+        ({"num": "abc"}, "num"),
+    ],
+)
+def test_param_int_err(params, param):
+    with pytest.raises(ValueError):
+        mip_api.util._param_int(params, param)
+
+
+def test_param_limit_int_negative():
+    with pytest.raises(ValueError):
+        mip_api.util._param_limit_int({"limit": "-1"})
+
+
+@pytest.mark.parametrize(
+    "params,expected_date",
+    [
+        ({}, None),
+        (None, None),
+        ({"target_date": "2025-05-15"}, "2025-05-15"),
+        ({"other": "value"}, None),
+    ],
+)
+def test_param_date_str(params, expected_date):
+    found_date = mip_api.util._param_date_str(params)
+    assert found_date == expected_date
+
+
+@pytest.mark.parametrize(
+    "params,expected_bool",
+    [
+        ({}, True),
+        (None, True),
+        ({"show_inactive_codes": "true"}, False),
+        ({"show_inactive_codes": "false"}, True),
+    ],
+)
+def test_param_hide_inactive_bool(params, expected_bool):
+    found_bool = mip_api.util._param_hide_inactive_bool(params)
+    assert found_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+    "params,expected_bool",
+    [
+        ({}, False),
+        (None, False),
+        ({"show_other_code": "true"}, True),
+        ({"show_other_code": "false"}, False),
+    ],
+)
+def test_param_show_other_bool(params, expected_bool):
+    found_bool = mip_api.util._param_show_other_bool(params)
+    assert found_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+    "params,expected_bool",
+    [
+        ({}, True),
+        (None, True),
+        ({"hide_no_program_code": "true"}, False),
+        ({"hide_no_program_code": "false"}, True),
+    ],
+)
+def test_param_show_no_program_bool(params, expected_bool):
+    found_bool = mip_api.util._param_show_no_program_bool(params)
+    assert found_bool == expected_bool
+
+
+@pytest.mark.parametrize(
+    "params,expected_list",
+    [
+        ({}, None),
+        (None, None),
+        ({"priority_codes": "1,2,3"}, ["1", "2", "3"]),
+        ({"priority_codes": "single"}, ["single"]),
+        ({"other": "value"}, None),
+    ],
+)
+def test_param_priority_list(params, expected_list):
+    found_list = mip_api.util._param_priority_list(params)
+    assert found_list == expected_list
+
+
+def test_params_dict_no_qsp():
+    """Test params_dict with no queryStringParameters in event"""
+    event = {"path": "/test"}
+    params = mip_api.util.params_dict(event)
+    assert params == {
+        "hide_inactive": True,
+        "limit": 0,
+        "priority_codes": None,
+        "show_no_program": True,
+        "show_other": False,
+        "date": None,
+    }
+
+
+def test_params_dict_with_qsp():
+    """Test params_dict with queryStringParameters in event"""
+    event = {
+        "path": "/test",
+        "queryStringParameters": {
+            "show_inactive_codes": "true",
+            "limit": "10",
+            "target_date": "2025-05-15",
+            "show_other_code": "yes",
+            "hide_no_program_code": "true",
+            "priority_codes": "1,2",
+        },
+    }
+    params = mip_api.util.params_dict(event)
+    assert params == {
+        "hide_inactive": False,
+        "limit": 10,
+        "priority_codes": ["1", "2"],
+        "show_no_program": False,
+        "show_other": True,
+        "date": "2025-05-15",
+    }
 
 
 @pytest.mark.parametrize(
