@@ -32,8 +32,8 @@ triggering an API gateway event.
 **Note on /balances endpoint:** The `/balances` endpoint requires AWS IAM
 authorization. Requests to this endpoint via CloudFront will receive a 403
 response directing callers to use the API Gateway URL directly with SigV4
-signing. The `/accounts` and `/tags` endpoints remain public and can be
-accessed via CloudFront.
+signing. The `/accounts` and `/tags` endpoints remain public and can be accessed
+via CloudFront.
 
 ### Chart of Accounts Behavior
 
@@ -147,8 +147,8 @@ CloudFront domain.
 
 #### IAM-Authenticated Endpoint (API Gateway Direct)
 
-The `/balances` endpoint requires AWS IAM authorization and must be accessed
-via the API Gateway URL directly with SigV4 signing:
+The `/balances` endpoint requires AWS IAM authorization and must be accessed via
+the API Gateway URL directly with SigV4 signing:
 
 - `https://<api-id>.execute-api.<region>.amazonaws.com/Prod/balances`
 
@@ -174,11 +174,12 @@ E.g.:
 
 #### /balances
 
-The `/balances` endpoint requires AWS IAM authorization and must be accessed
-via the API Gateway URL directly with SigV4 signing. The endpoint returns a CSV
+The `/balances` endpoint requires AWS IAM authorization and must be accessed via
+the API Gateway URL directly with SigV4 signing. The endpoint returns a CSV
 format suitable for FloQast consumption.
 
 CSV headers:
+
 ```csv
 AccountNumber,AccountName,PeriodStart,PeriodEnd,StartBalance,Activity,EndBalance
 ```
@@ -219,16 +220,16 @@ If a bad response has been cached, it may need to be
 The CloudFormation template exports the following values for downstream
 integration:
 
-| Output | Description |
-| ------ | ----------- |
-| ApiRouteChartOfAccounts | CloudFront URL for the `/accounts` endpoint (public) |
-| ApiRouteTrialBalances | API Gateway URL for the `/balances` endpoint (IAM auth required) |
-| ApiRouteValidTags | CloudFront URL for the `/tags` endpoint (public) |
-| OriginUrl | API Gateway base URL with stage (`/Prod/`), exported for downstream lambdas to construct endpoint URLs |
-| BalancesExecuteArn | execute-api ARN for the `/balances` endpoint, exported for downstream IAM policies |
-| FunctionArn | Lambda Function ARN |
-| FunctionRoleArn | Implicit IAM Role created for function |
-| CloudfrontDomain | Domain name for the CloudFront distribution |
+| Output                  | Description                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| ApiRouteChartOfAccounts | CloudFront URL for the `/accounts` endpoint (public)                                                   |
+| ApiRouteTrialBalances   | API Gateway URL for the `/balances` endpoint (IAM auth required)                                       |
+| ApiRouteValidTags       | CloudFront URL for the `/tags` endpoint (public)                                                       |
+| OriginUrl               | API Gateway base URL with stage (`/Prod/`), exported for downstream lambdas to construct endpoint URLs |
+| BalancesExecuteArn      | execute-api ARN for the `/balances` endpoint, exported for downstream IAM policies                     |
+| FunctionArn             | Lambda Function ARN                                                                                    |
+| FunctionRoleArn         | Implicit IAM Role created for function                                                                 |
+| CloudfrontDomain        | Domain name for the CloudFront distribution                                                            |
 
 ### S3 Cache
 
