@@ -31,7 +31,7 @@ mock_priority_qsp_param = {"priority_codes": mock_priority_codes_str}
 expected_default_params = {
     "hide_inactive": True,
     "limit": 0,
-    "priority_codes": [],
+    "priority_codes": None,
     "show_no_program": True,
     "show_other": False,
     "date": None,
@@ -59,29 +59,40 @@ mock_date_first = date(2025, 5, 1)
 expected_start_date_first = "2025-04-01"
 expected_end_date_first = "2025-04-30"
 
-mock_date_prev_month = date(2025, 4, 15)
-expected_start_date_prev = "2025-04-01"
-expected_end_date_prev = "2025-04-15"
+# Real-world use case: lambda-finops-floqast-sftp progressively subtracts one
+# month from today's date to request previous month balances. The test data
+# below models this pattern with today = March 15, 2026:
+#
+#   Iteration 1: target_date = 2026-03-15 (current month → MTD)
+#   Iteration 2: target_date = 2026-02-15 (previous month, short month → full month)
+#   Iteration 3: target_date = 2026-01-15 (previous month → full month)
+#   Iteration 4: target_date = 2025-12-15 (previous month, year boundary → full month)
+#
+# The test_periods_previous_month parametrized test requires today() to be mocked
+# to a different date than the input, because target_period() compares the input
+# month against today's month to decide between MTD and full-month behavior.
 
-mock_date_first_prev = date(2025, 4, 1)
-expected_start_date_first_prev = "2025-03-01"
-expected_end_date_first_prev = "2025-03-31"
+mock_today = date(2026, 3, 15)
 
-# Test date for previous month scenario (when today is later in the year)
-mock_date_prev = date(2025, 3, 15)
-expected_start_date_prev_full = "2025-03-01"
-expected_end_date_prev_full = "2025-03-15"
+# Previous month: February 15 (short month — 28 days in non-leap year)
+mock_prev_feb = date(2026, 2, 15)
+expected_period_prev_feb = ("2026-02-01", "2026-02-28")
 
-# Test date for previous month scenario with mocked date.today()
-mock_date_input = date(2025, 3, 15)  # March 15, 2025
-mock_date_today = date(2025, 4, 10)  # April 10, 2025 (after March)
-expected_period_prev_month = ("2025-03-01", "2025-03-31")
+# Previous month: January 15 (no year boundary)
+mock_prev_jan = date(2026, 1, 15)
+expected_period_prev_jan = ("2026-01-01", "2026-01-31")
 
-# Note: The test setup mocks date.today() to the input date, which makes all dates
-# appear as the current month. To test the "previous month" scenario, we need to
-# mock date.today() to a date AFTER the input date. This is not easily done with
-# the current parametrized test setup, so we add a separate test for the previous
-# month scenario.
+# Previous month: December 15 (year boundary crossing)
+mock_prev_dec = date(2025, 12, 15)
+expected_period_prev_dec = ("2025-12-01", "2025-12-31")
+
+# Day == 1 branch: March 1 (no year boundary)
+mock_mar_first = date(2026, 3, 1)
+expected_period_mar_first = ("2026-02-01", "2026-02-28")
+
+# Day == 1 branch: January 1 (year boundary)
+mock_jan_first = date(2026, 1, 1)
+expected_period_jan_first = ("2025-12-01", "2025-12-31")
 
 mock_balance_start = 9001.01
 mock_balance_activity = 101.01
@@ -541,40 +552,59 @@ def test_bad_secrets(mocker):
 
 
 @pytest.mark.parametrize(
-    "mock_date,expected_period",
+    "mock_date,mock_today_date,expected_period",
     [
-        (mock_date_early, (expected_start_date_early, expected_end_date_early)),
-        (mock_date_late, (expected_start_date_late, expected_end_date_late)),
-        (mock_date_first, (expected_start_date_first, expected_end_date_first)),
-        (mock_date_prev_month, (expected_start_date_prev, expected_end_date_prev)),
         (
-            mock_date_first_prev,
-            (expected_start_date_first_prev, expected_end_date_first_prev),
+            mock_date_early,
+            mock_date_early,
+            (expected_start_date_early, expected_end_date_early),
         ),
+        (
+            mock_date_late,
+            mock_date_late,
+            (expected_start_date_late, expected_end_date_late),
+        ),
+        (
+            mock_date_first,
+            mock_date_first,
+            (expected_start_date_first, expected_end_date_first),
+        ),
+        (mock_mar_first, mock_today, expected_period_mar_first),
+        (mock_jan_first, mock_today, expected_period_jan_first),
     ],
 )
-def test_periods(mocker, mock_date, expected_period):
-    """Test getting balance periods"""
-    # Create a mock date class that returns mock_date for both today() and fromisoformat()
+def test_periods(mocker, mock_date, mock_today_date, expected_period):
+    """Test getting balance periods for current month and day==1 scenarios"""
     mock_date_class = mocker.MagicMock(spec=date)
-    mock_date_class.today.return_value = mock_date
+    mock_date_class.today.return_value = mock_today_date
     mock_date_class.fromisoformat.return_value = mock_date
 
-    # Mock the date class in mip_api.util
     mocker.patch("mip_api.util.date", new=mock_date_class)
 
-    # first, test passing in a date string
-    mock_date_str = mock_date.isoformat()
-    found_period = mip_api.util.target_period(mock_date_str)
-    assert found_period == expected_period
-
-    # next, test without arguments (uses date.today)
-    found_period = mip_api.util.target_period()
+    # test passing in a date string
+    found_period = mip_api.util.target_period(mock_date.isoformat())
     assert found_period == expected_period
 
 
-def test_periods_previous_month(mocker):
-    """Test getting balance periods for a previous month (not current month)"""
+@pytest.mark.parametrize(
+    "mock_date_input,mock_date_today,expected_period",
+    [
+        # Previous month: February (short month — 28 days)
+        (mock_prev_feb, mock_today, expected_period_prev_feb),
+        # Previous month: January (no year boundary)
+        (mock_prev_jan, mock_today, expected_period_prev_jan),
+        # Previous month: December (year boundary crossing)
+        (mock_prev_dec, mock_today, expected_period_prev_dec),
+    ],
+)
+def test_periods_previous_month(
+    mocker, mock_date_input, mock_date_today, expected_period
+):
+    """Test getting balance periods for a previous month (not current month)
+
+    Models the lambda-finops-floqast-sftp use case: today is March 15, 2026,
+    and the caller progressively subtracts one month to request previous months.
+    """
     # Create a mock date class
     mock_date_class = mocker.MagicMock(spec=date)
 
@@ -591,7 +621,7 @@ def test_periods_previous_month(mocker):
     found_period = mip_api.util.target_period(mock_date_str)
 
     # When the input date is in a previous month (not current), should return full month
-    assert found_period == expected_period_prev_month
+    assert found_period == expected_period
 
 
 def test_upstream(mocker, requests_mock):

@@ -186,10 +186,14 @@ def target_period(when=None):
         end = target_day
     else:
         # Previous month: return full month
-        following_month_same_day = target_day.replace(month=(target_day.month + 1))
-        following_month_first = following_month_same_day.replace(day=1)
-        end = following_month_first - timedelta(days=1)
-        start = end.replace(day=1)
+
+        # Use timedelta to find the last day of the target month
+        # by going 33 days past the first of the month to enter following
+        # month, resetting to the first of the following month, and
+        # subtracting a day to get the end of the target month.
+        start = target_day.replace(day=1)
+        _following_first = (start + timedelta(days=33)).replace(day=1)
+        end = _following_first - timedelta(days=1)
 
     start_str = start.isoformat()
     end_str = end.isoformat()
