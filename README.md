@@ -7,13 +7,13 @@ An AWS Lambda microservice providing limited read-only access to MIP Cloud.
 This microservice is designed to retrieve data using the MIP Cloud API and
 present the data in a useful format.
 
-Formats available:
+Data available:
 
-| API Route | Description                                                                 |
-| --------- | --------------------------------------------------------------------------- |
-| /accounts | A dictionary mapping the chart of program accounts to their friendly names. |
-| /balances | A CSV listing GL account balances, appropriate for FloQast consumption.     |
-| /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`.    |
+| API Route | Description                                                                 | Auth Required |
+| --------- | --------------------------------------------------------------------------- | ------------- |
+| /accounts | A dictionary mapping the chart of program accounts to their friendly names. | No            |
+| /balances | A CSV listing GL account balances, appropriate for FloQast consumption.     | AWS IAM       |
+| /tags     | A list of valid tag values for either `CostCenter` or `CostCenterOther`.    | No            |
 
 Since we reach out to a third-party API across the internet, responses are
 cached to minimize interaction with the API and mitigate potential environmental
@@ -28,6 +28,12 @@ data to be stored in Cloudfront for a default of one day.
 
 In the event of a cache hit, Cloudfront will return the cached value without
 triggering an API gateway event.
+
+**Note on /balances endpoint:** The `/balances` endpoint requires AWS IAM
+authorization. Requests to this endpoint via CloudFront will receive a 403
+response directing callers to use the API Gateway URL directly with SigV4
+signing. The `/accounts` and `/tags` endpoints remain public and can be accessed
+via CloudFront.
 
 ### Chart of Accounts Behavior
 
@@ -127,17 +133,24 @@ other than today.
 
 ### Triggering
 
-The CloudFormation template will output all available endpoint URLs for
-triggering the lambda, e.g.: `https://abcxyz.cloudfront.net/accounts`
-`https://abcxyz.cloudfront.net/tags`
+The CloudFormation template outputs endpoint URLs for triggering the lambda.
 
-These URLs can be also constructed by appending the API Gateway paths to the
-CloudFormation domain.
+#### Public Endpoints (CloudFront)
 
-#### Origin URL
+The following endpoints are accessible via CloudFront without authentication:
 
-The CloudFormation template also outputs the origin URL behind the CloudFront
-distribution for debugging purposes.
+- `https://abcxyz.cloudfront.net/accounts`
+- `https://abcxyz.cloudfront.net/tags`
+
+These URLs can also be constructed by appending the API Gateway paths to the
+CloudFront domain.
+
+#### IAM-Authenticated Endpoint (API Gateway Direct)
+
+The `/balances` endpoint requires AWS IAM authorization and must be accessed via
+the API Gateway URL directly with SigV4 signing:
+
+- `https://<api-id>.execute-api.<region>.amazonaws.com/Prod/balances`
 
 ### Response Formats
 
@@ -157,6 +170,18 @@ E.g.:
   "54321": "Inactive",
   "990300": "Platform Infrastructure"
 }
+```
+
+#### /balances
+
+The `/balances` endpoint requires AWS IAM authorization and must be accessed via
+the API Gateway URL directly with SigV4 signing. The endpoint returns a CSV
+format suitable for FloQast consumption.
+
+CSV headers:
+
+```csv
+AccountNumber,AccountName,PeriodStart,PeriodEnd,StartBalance,Activity,EndBalance
 ```
 
 #### /tags
@@ -189,6 +214,22 @@ impact of the lambda cold starts by calling the lambda less frequently.
 
 If a bad response has been cached, it may need to be
 [manually invalidated through Cloudfront](https://aws.amazon.com/premiumsupport/knowledge-center/cloudfront-clear-cache/).
+
+### CloudFormation Outputs
+
+The CloudFormation template exports the following values for downstream
+integration:
+
+| Output                  | Description                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| ApiRouteChartOfAccounts | CloudFront URL for the `/accounts` endpoint (public)                                                   |
+| ApiRouteTrialBalances   | API Gateway URL for the `/balances` endpoint (IAM auth required)                                       |
+| ApiRouteValidTags       | CloudFront URL for the `/tags` endpoint (public)                                                       |
+| OriginUrl               | API Gateway base URL with stage (`/Prod/`), exported for downstream lambdas to construct endpoint URLs |
+| BalancesExecuteArn      | execute-api ARN for the `/balances` endpoint, exported for downstream IAM policies                     |
+| FunctionArn             | Lambda Function ARN                                                                                    |
+| FunctionRoleArn         | Implicit IAM Role created for function                                                                 |
+| CloudfrontDomain        | Domain name for the CloudFront distribution                                                            |
 
 ### S3 Cache
 
