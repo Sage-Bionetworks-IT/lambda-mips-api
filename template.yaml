@@ -65,6 +65,37 @@ Resources:
         DefaultAuthorizer: NONE
       EndpointConfiguration:
         Type: REGIONAL
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId",
+          "ip":"$context.identity.sourceIp",
+          "caller":"$context.identity.caller",
+          "user":"$context.identity.user",
+          "requestTime":"$context.requestTime",
+          "httpMethod":"$context.httpMethod",
+          "path":"$context.path",
+          "status":"$context.status",
+          "protocol":"$context.protocol",
+          "responseLength":"$context.responseLength",
+          "authenticateStatus":"$context.authenticate.status",
+          "authenticateError":"$context.authenticate.error",
+          "authorizeStatus":"$context.authorize.status",
+          "authorizeError":"$context.authorize.error",
+          "integrationStatus":"$context.integration.status",
+          "integrationError":"$context.integrationErrorMessage",
+          "error":"$context.error.messageString"}
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${AWS::StackName}-access-logs'
+      RetentionInDays: 30
 
   CacheBucket:
     Type: AWS::S3::Bucket
@@ -287,6 +318,9 @@ Resources:
       AliasName: !Sub 'alias/${SsmAliasPrefix}-ssm-key'
 
 Outputs:
+  ApiAccessLogGroupArn:
+    Description: "CloudWatch Log Group for API Gateway access logs"
+    Value: !GetAtt ApiAccessLogGroup.Arn
   ApiRouteChartOfAccounts:
     Description: "CloudFront URL for the full chart of accounts"
     Value: !Sub "https://${CloudFrontCache.DomainName}/accounts"
