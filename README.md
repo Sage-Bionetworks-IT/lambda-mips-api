@@ -152,6 +152,9 @@ the API Gateway URL directly with SigV4 signing:
 
 - `https://<api-id>.execute-api.<region>.amazonaws.com/Prod/balances`
 
+For a detailed description of different ways access the URL with SigV4 signing,
+see [docs/balances-auth-example.md](docs/balances-auth-example.md).
+
 ### Response Formats
 
 #### /accounts
