@@ -32,20 +32,60 @@ the API Gateway URL directly.
 Navigate to the API Gateway -> API -> Resources, and select `/Prod/balances`.
 Navigate to the Test tab, enter query strings, and test.
 
-## Option 2: Python (requests + botocore SigV4)
+
+## Option 2: AWS CLI
+
+The `aws apigateway test-invoke-method` command invokes the endpoint directly
+through the API Gateway control plane, bypassing the need for SigV4 signing
+against the execute-api service. You need the REST API ID and the resource ID
+for `/balances`.
+
+```bash
+# Find the REST API ID
+aws apigateway get-rest-apis \
+  --query "items[?name=='<stack-name>'].id" \
+  --output text
+
+# Find the resource ID for /balances
+aws apigateway get-resources \
+--rest-api-id <api-id> \
+  --query "items[?path=='/balances'].id" \
+  --output text
+
+# Invoke the endpoint
+aws apigateway test-invoke-method \
+  --rest-api-id <api-id> \
+  --resource-id <resource-id> \
+  --http-method GET
+
+# Or with a query string parameter:
+aws apigateway test-invoke-method \
+  --rest-api-id <api-id> \
+  --resource-id <resource-id> \
+  --http-method GET \
+  --path-with-query-string "/balances?target_date=2026-03-15"
+```
+
+**Note:** This command requires `apigateway:TestInvokeMethod` permission rather
+than `execute-api:Invoke`. It is useful for quick testing but does not exercise
+the IAM authorizer — the request is always allowed if you have the control-plane
+permission.
+
+
+## Option 3: Python
 
 ```python
+import boto3
 import requests
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
-from botocore.session import Session
 
 # Configuration
 region = "us-east-1"
 api_url = "https://<api-id>.execute-api.us-east-1.amazonaws.com/Prod/balances"
 
 # Get credentials from the default credential chain
-session = Session()
+session = boto3.Session()
 credentials = session.get_credentials().get_frozen_credentials()
 
 # Create and sign the request
@@ -57,34 +97,6 @@ response = requests.get(api_url, headers=dict(request.headers))
 
 print(response.status_code)
 print(response.text)
-```
-
-## Option 3: Python (boto3 + urllib)
-
-```python
-import json
-from urllib.request import Request, urlopen
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-import boto3
-
-# Configuration
-region = "us-east-1"
-api_url = "https://<api-id>.execute-api.us-east-1.amazonaws.com/Prod/balances"
-
-# Get credentials
-session = boto3.Session()
-credentials = session.get_credentials().get_frozen_credentials()
-
-# Sign the request
-request = AWSRequest(method="GET", url=api_url)
-SigV4Auth(credentials, "execute-api", region).add_auth(request)
-
-# Send using urllib (no extra dependency)
-req = Request(api_url, headers=dict(request.headers))
-with urlopen(req) as resp:
-    print(resp.status)
-    print(resp.read().decode())
 ```
 
 ## Troubleshooting
